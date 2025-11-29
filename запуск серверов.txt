@@ -1,0 +1,5 @@
+cd C:\projects\moex-trader\server
+npm run dev
+
+cd C:\projects\moex-trader\client
+npm run dev
