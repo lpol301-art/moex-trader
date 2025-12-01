@@ -103,6 +103,8 @@ function App() {
   const [autoDayProfile, setAutoDayProfile] = useState(true);
   const [autoWeekProfile, setAutoWeekProfile] = useState(false);
   const [autoSessionProfile, setAutoSessionProfile] = useState(true);
+  const [autoMonthProfile, setAutoMonthProfile] = useState(false);
+  const [autoVisibleProfile, setAutoVisibleProfile] = useState(true);
 
   async function fetchCandles(sym, tf, { preserveOld = true } = {}) {
     try {
@@ -421,6 +423,22 @@ function App() {
               />
               Сессия
             </label>
+            <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <input
+                type="checkbox"
+                checked={autoMonthProfile}
+                onChange={(e) => setAutoMonthProfile(e.target.checked)}
+              />
+              Месяц
+            </label>
+            <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <input
+                type="checkbox"
+                checked={autoVisibleProfile}
+                onChange={(e) => setAutoVisibleProfile(e.target.checked)}
+              />
+              Весь видимый диапазон
+            </label>
           </div>
         </ToolbarDropdown>
 
@@ -503,6 +521,8 @@ function App() {
                 autoDayProfile={autoDayProfile}
                 autoWeekProfile={autoWeekProfile}
                 autoSessionProfile={autoSessionProfile}
+                autoMonthProfile={autoMonthProfile}
+                autoVisibleProfile={autoVisibleProfile}
               />
             ) : (
               <div

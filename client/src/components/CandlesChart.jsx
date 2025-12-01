@@ -28,25 +28,35 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const SESSION_GAP_MS = 2 * 60 * 60 * 1000; // считаем новую сессию, если пауза > 2ч
 const AUTO_PROFILE_STYLES = {
   day: {
-    fill: 'rgba(236, 72, 153, 0.08)',
-    profile: 'rgba(236, 72, 153, 0.9)'
+    fill: 'rgba(37, 99, 235, 0.18)',
+    profile: 'rgba(37, 99, 235, 0.85)'
   },
   week: {
-    fill: 'rgba(245, 158, 11, 0.08)',
-    profile: 'rgba(245, 158, 11, 0.9)'
+    fill: 'rgba(124, 58, 237, 0.18)',
+    profile: 'rgba(124, 58, 237, 0.85)'
   },
   session: {
-    fill: 'rgba(34, 197, 94, 0.08)',
-    profile: 'rgba(34, 197, 94, 0.9)'
+    fill: 'rgba(16, 185, 129, 0.18)',
+    profile: 'rgba(16, 185, 129, 0.85)'
+  },
+  month: {
+    fill: 'rgba(245, 158, 11, 0.18)',
+    profile: 'rgba(245, 158, 11, 0.82)'
+  },
+  visible: {
+    fill: 'rgba(59, 130, 246, 0.18)',
+    profile: 'rgba(59, 130, 246, 0.82)'
   }
 };
 
 function estimateRangeBins(candlesCount, priceAreaHeight) {
-  const base = Math.max(12, Math.min(120, Math.floor((candlesCount || 1) / 2)));
-  if (!Number.isFinite(priceAreaHeight) || priceAreaHeight <= 0) return base;
+  const base = Math.max(16, Math.min(60, Math.floor((candlesCount || 1) / 3)));
+  if (!Number.isFinite(priceAreaHeight) || priceAreaHeight <= 0) {
+    return clamp(Math.round(base), 24, 36);
+  }
 
-  const byHeight = Math.max(10, Math.min(120, Math.floor(priceAreaHeight / 8)));
-  return Math.round((base + byHeight) / 2);
+  const byHeight = priceAreaHeight / 18; // около 16–22px на ступень
+  return clamp(Math.round((base + byHeight) / 2), 24, 36);
 }
 
 function CandlesChart({
@@ -62,7 +72,9 @@ function CandlesChart({
   rangePinRequestId,
   autoDayProfile,
   autoWeekProfile,
-  autoSessionProfile
+  autoSessionProfile,
+  autoMonthProfile,
+  autoVisibleProfile
 }) {
   const wrapperRef = useRef(null);
   const canvasRef = useRef(null);
@@ -237,6 +249,21 @@ function CandlesChart({
       });
     }
 
+    if (autoMonthProfile) {
+      const lastDate = new Date(lastTs);
+      const monthStart = new Date(
+        lastDate.getFullYear(),
+        lastDate.getMonth(),
+        1
+      ).getTime();
+      const nextMonthStart = new Date(
+        lastDate.getFullYear(),
+        lastDate.getMonth() + 1,
+        1
+      ).getTime();
+      ranges.push({ type: 'month', startTs: monthStart, endTs: nextMonthStart });
+    }
+
     if (autoSessionProfile) {
       let startIndex = candles.length - 1;
       for (let i = candleTimes.length - 2; i >= 0; i -= 1) {
@@ -250,6 +277,14 @@ function CandlesChart({
         startIndex = i;
       }
       ranges.push({ type: 'session', startIndex, endIndex: candles.length - 1 });
+    }
+
+    if (autoVisibleProfile) {
+      ranges.push({
+        type: 'visible',
+        startIndex: visibleWindow.startIndex,
+        endIndex: visibleWindow.endIndex - 1
+      });
     }
 
     const priceAreaHeight = layout.priceBottom - layout.priceTop;
@@ -299,13 +334,16 @@ function CandlesChart({
       }
 
       const lastLocal = Math.max(visibleWindow.visibleCandles.length - 1, 0);
+      const sliceStart = Math.max(visibleWindow.startIndex, startGlobal);
+      const sliceEnd = Math.min(lastVisibleGlobal, endGlobal);
+
       const startLocal = clamp(
-        startGlobal - visibleWindow.startIndex,
+        sliceStart - visibleWindow.startIndex,
         0,
         lastLocal
       );
       const endLocal = clamp(
-        endGlobal - visibleWindow.startIndex,
+        sliceEnd - visibleWindow.startIndex,
         0,
         lastLocal
       );
@@ -316,7 +354,7 @@ function CandlesChart({
       const x0 = converters.indexToX(left) - layout.candleWidth / 2;
       const x1 = converters.indexToX(right) + layout.candleWidth / 2;
 
-      const slice = candles.slice(startGlobal, endGlobal + 1);
+      const slice = candles.slice(sliceStart, sliceEnd + 1);
       const bins = estimateRangeBins(slice.length, priceAreaHeight);
       const profile = computeRangeProfile(slice, null, null, bins);
       if (!profile) return null;
@@ -344,7 +382,9 @@ function CandlesChart({
     visibleWindow,
     autoDayProfile,
     autoWeekProfile,
-    autoSessionProfile
+    autoSessionProfile,
+    autoMonthProfile,
+    autoVisibleProfile
   ]);
 
   // прямоугольник текущего выделения в координатах canvas (x0/x1/y0/y1!)
@@ -521,6 +561,23 @@ function CandlesChart({
     // сетка
     drawGrid(ctx, geometry, priceStats, visibleWindow.visibleCandles);
 
+    // авто-профили (день / неделя / сессия / месяц / видимый диапазон)
+    autoProfiles.forEach(({ box, profile, type }) => {
+      const colors = AUTO_PROFILE_STYLES[type] || {
+        fill: 'rgba(255, 255, 255, 0.06)',
+        profile: 'rgba(255, 255, 255, 0.8)'
+      };
+
+      ctx.save();
+      ctx.fillStyle = colors.fill;
+      ctx.fillRect(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0);
+      ctx.restore();
+
+      renderRangeProfileInBox(ctx, profile, geometry, box, {
+        profileColor: colors.profile
+      });
+    });
+
     // свечи + объёмы
     renderCandles(
       ctx,
@@ -541,23 +598,6 @@ function CandlesChart({
         showPoc: profileShowPoc
       });
     }
-
-    // авто-профили (день / неделя / сессия)
-    autoProfiles.forEach(({ box, profile, type }) => {
-      const colors = AUTO_PROFILE_STYLES[type] || {
-        fill: 'rgba(255, 255, 255, 0.06)',
-        profile: 'rgba(255, 255, 255, 0.9)'
-      };
-
-      ctx.save();
-      ctx.fillStyle = colors.fill;
-      ctx.fillRect(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0);
-      ctx.restore();
-
-      renderRangeProfileInBox(ctx, profile, geometry, box, {
-        profileColor: colors.profile
-      });
-    });
 
     // закреплённые Range-профили (синие)
     fixedProfiles.forEach(({ box, profile }) => {

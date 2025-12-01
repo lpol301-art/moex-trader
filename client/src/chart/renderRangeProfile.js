@@ -89,6 +89,7 @@ export function renderRangeProfileInBox(
     : fallbackStep;
 
   const color = options.profileColor || 'rgba(230, 183, 50, 0.85)';
+  const innerRight = x1 - 2; // чуть-чуть отступаем от края
 
   ctx.save();
 
@@ -103,19 +104,22 @@ export function renderRangeProfileInBox(
     const yBottom = priceToY ? priceToY(startPrice) : y1;
     const yTop = priceToY && Number.isFinite(endPrice) ? priceToY(endPrice) : y0;
 
-    const yCenter = Number.isFinite(yBottom) && Number.isFinite(yTop)
-      ? (yBottom + yTop) / 2
+    const yBottomClamped = Math.min(y1, Math.max(y0, yBottom));
+    const yTopClamped = Math.min(y1, Math.max(y0, yTop));
+
+    const yCenter = Number.isFinite(yBottomClamped) && Number.isFinite(yTopClamped)
+      ? (yBottomClamped + yTopClamped) / 2
       : y1 - ((y1 - y0) / bins.length) * (idx + 0.5);
 
-    const barHeightRaw = Math.abs(yTop - yBottom) || (y1 - y0) / bins.length;
-    const barHeight = Math.max(2, Math.min(10, barHeightRaw * 0.9));
+    const barHeightRaw = Math.abs(yTopClamped - yBottomClamped) || (y1 - y0) / bins.length;
+    const barHeight = Math.max(2, Math.min((y1 - y0) / bins.length, barHeightRaw * 0.95));
 
     const barW = (b.volume / maxVol) * width;
     const barWidthClamped = Math.max(0, Math.min(barW, width));
-    const xEnd = x1;
-    const xStart = xEnd - barWidthClamped;
+    const xEnd = innerRight;
+    const xStart = Math.max(x0, xEnd - barWidthClamped);
 
-    const yDraw = Math.min(y1, Math.max(y0, yCenter));
+    const yDraw = Math.min(y1 - barHeight / 2, Math.max(y0 + barHeight / 2, yCenter));
     ctx.fillStyle = color;
     ctx.fillRect(xStart, yDraw - barHeight / 2, barWidthClamped, barHeight);
   });
