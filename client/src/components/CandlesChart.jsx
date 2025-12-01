@@ -574,7 +574,8 @@ function CandlesChart({
       ctx.restore();
 
       renderRangeProfileInBox(ctx, profile, geometry, box, {
-        profileColor: colors.profile
+        profileColor: colors.profile,
+        pocColor: 'rgba(255, 255, 255, 0.9)'
       });
     });
 
@@ -607,7 +608,8 @@ function CandlesChart({
       ctx.restore();
 
       renderRangeProfileInBox(ctx, profile, geometry, box, {
-        profileColor: 'rgba(59, 130, 246, 0.85)'
+        profileColor: 'rgba(59, 130, 246, 0.88)',
+        pocColor: 'rgba(255, 255, 255, 0.9)'
       });
     });
 
@@ -624,7 +626,8 @@ function CandlesChart({
       ctx.restore();
 
       renderRangeProfileInBox(ctx, rangeProfile, geometry, selectionBox, {
-        profileColor: profileColor || '#16a34a'
+        profileColor: profileColor || 'rgba(34, 197, 94, 0.92)',
+        pocColor: 'rgba(249, 250, 255, 0.95)'
       });
     }
 
