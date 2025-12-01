@@ -28,25 +28,41 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const SESSION_GAP_MS = 2 * 60 * 60 * 1000; // считаем новую сессию, если пауза > 2ч
 const AUTO_PROFILE_STYLES = {
   day: {
-    fill: 'rgba(236, 72, 153, 0.08)',
-    profile: 'rgba(236, 72, 153, 0.9)'
+    fill: 'rgba(37, 99, 235, 0.16)',
+    profile: 'rgba(37, 99, 235, 0.82)'
   },
   week: {
-    fill: 'rgba(245, 158, 11, 0.08)',
-    profile: 'rgba(245, 158, 11, 0.9)'
+    fill: 'rgba(124, 58, 237, 0.16)',
+    profile: 'rgba(124, 58, 237, 0.82)'
   },
   session: {
-    fill: 'rgba(34, 197, 94, 0.08)',
-    profile: 'rgba(34, 197, 94, 0.9)'
+    fill: 'rgba(16, 185, 129, 0.16)',
+    profile: 'rgba(16, 185, 129, 0.82)'
+  },
+  month: {
+    fill: 'rgba(245, 158, 11, 0.16)',
+    profile: 'rgba(245, 158, 11, 0.8)'
+  },
+  visible: {
+    fill: 'rgba(59, 130, 246, 0.16)',
+    profile: 'rgba(59, 130, 246, 0.8)'
   }
 };
 
-function estimateRangeBins(candlesCount, priceAreaHeight) {
-  const base = Math.max(12, Math.min(120, Math.floor((candlesCount || 1) / 2)));
-  if (!Number.isFinite(priceAreaHeight) || priceAreaHeight <= 0) return base;
+function strengthen(color, alpha) {
+  const match = color.match(/rgba\(([^)]+),\s*([0-9.]+)\)/);
+  if (!match) return color;
+  return `rgba(${match[1]}, ${alpha})`;
+}
 
-  const byHeight = Math.max(10, Math.min(120, Math.floor(priceAreaHeight / 8)));
-  return Math.round((base + byHeight) / 2);
+function estimateRangeBins(candlesCount, priceAreaHeight) {
+  const base = Math.max(16, Math.min(60, Math.floor((candlesCount || 1) / 3)));
+  if (!Number.isFinite(priceAreaHeight) || priceAreaHeight <= 0) {
+    return clamp(Math.round(base), 24, 36);
+  }
+
+  const byHeight = priceAreaHeight / 18; // около 16–22px на ступень
+  return clamp(Math.round((base + byHeight) / 2), 24, 36);
 }
 
 function CandlesChart({
@@ -58,11 +74,11 @@ function CandlesChart({
   profileVaOpacity,
   profileWidth,
   profileShowPoc,
-  rangeProfileEnabled,
-  rangePinRequestId,
   autoDayProfile,
   autoWeekProfile,
-  autoSessionProfile
+  autoSessionProfile,
+  autoMonthProfile,
+  autoVisibleProfile
 }) {
   const wrapperRef = useRef(null);
   const canvasRef = useRef(null);
@@ -71,12 +87,24 @@ function CandlesChart({
   const [barsPerScreen, setBarsPerScreen] = useState(140);
   const [rightOffset, setRightOffset] = useState(0);
 
-  // текущее живое выделение
-  const [selectionRange, setSelectionRange] = useState(null);
-  // закреплённые диапазоны (по индексам свечей)
-  const [fixedRanges, setFixedRanges] = useState([]);
-
   const [crosshair, setCrosshair] = useState({ visible: false, x: 0, y: 0 });
+
+  const autoProfileFlags = useMemo(
+    () => ({
+      day: autoDayProfile,
+      week: autoWeekProfile,
+      session: autoSessionProfile,
+      month: autoMonthProfile,
+      visible: autoVisibleProfile
+    }),
+    [
+      autoDayProfile,
+      autoWeekProfile,
+      autoSessionProfile,
+      autoMonthProfile,
+      autoVisibleProfile
+    ]
+  );
 
   const candleTimes = useMemo(() => {
     if (!candles || !candles.length) return [];
@@ -89,8 +117,7 @@ function CandlesChart({
   const dragRef = useRef({
     type: null,
     startX: 0,
-    startOffset: 0,
-    startIndex: null
+    startOffset: 0
   });
 
   // размер контейнера
@@ -178,37 +205,6 @@ function CandlesChart({
     profileStepMode
   ]);
 
-  // свечи в текущем диапазоне
-  const rangeCandles = useMemo(() => {
-    if (!selectionRange || !candles || !candles.length) return [];
-    const start = Math.max(0, Math.min(selectionRange.start, selectionRange.end));
-    const end = Math.min(
-      candles.length,
-      Math.max(selectionRange.start, selectionRange.end) + 1
-    );
-    return candles.slice(start, end);
-  }, [selectionRange, candles]);
-
-  // профиль текущего диапазона
-  const rangeProfile = useMemo(() => {
-    if (!geometry || !rangeCandles.length || !rangeProfileEnabled) return null;
-
-    const bins = estimateRangeBins(
-      rangeCandles.length,
-      geometry.layout.priceBottom - geometry.layout.priceTop
-    );
-    return computeRangeProfile(
-      rangeCandles,
-      null,
-      null,
-      bins
-    );
-  }, [
-    geometry,
-    rangeCandles,
-    rangeProfileEnabled
-  ]);
-
   // Авто-профили: день / неделя / сессия (строятся от последней свечи)
   const autoProfiles = useMemo(() => {
     if (!geometry || !candles || !candles.length) return [];
@@ -237,6 +233,21 @@ function CandlesChart({
       });
     }
 
+    if (autoMonthProfile) {
+      const lastDate = new Date(lastTs);
+      const monthStart = new Date(
+        lastDate.getFullYear(),
+        lastDate.getMonth(),
+        1
+      ).getTime();
+      const nextMonthStart = new Date(
+        lastDate.getFullYear(),
+        lastDate.getMonth() + 1,
+        1
+      ).getTime();
+      ranges.push({ type: 'month', startTs: monthStart, endTs: nextMonthStart });
+    }
+
     if (autoSessionProfile) {
       let startIndex = candles.length - 1;
       for (let i = candleTimes.length - 2; i >= 0; i -= 1) {
@@ -250,6 +261,14 @@ function CandlesChart({
         startIndex = i;
       }
       ranges.push({ type: 'session', startIndex, endIndex: candles.length - 1 });
+    }
+
+    if (autoVisibleProfile) {
+      ranges.push({
+        type: 'visible',
+        startIndex: visibleWindow.startIndex,
+        endIndex: visibleWindow.endIndex - 1
+      });
     }
 
     const priceAreaHeight = layout.priceBottom - layout.priceTop;
@@ -299,13 +318,16 @@ function CandlesChart({
       }
 
       const lastLocal = Math.max(visibleWindow.visibleCandles.length - 1, 0);
+      const sliceStart = Math.max(visibleWindow.startIndex, startGlobal);
+      const sliceEnd = Math.min(lastVisibleGlobal, endGlobal);
+
       const startLocal = clamp(
-        startGlobal - visibleWindow.startIndex,
+        sliceStart - visibleWindow.startIndex,
         0,
         lastLocal
       );
       const endLocal = clamp(
-        endGlobal - visibleWindow.startIndex,
+        sliceEnd - visibleWindow.startIndex,
         0,
         lastLocal
       );
@@ -316,7 +338,7 @@ function CandlesChart({
       const x0 = converters.indexToX(left) - layout.candleWidth / 2;
       const x1 = converters.indexToX(right) + layout.candleWidth / 2;
 
-      const slice = candles.slice(startGlobal, endGlobal + 1);
+      const slice = candles.slice(sliceStart, sliceEnd + 1);
       const bins = estimateRangeBins(slice.length, priceAreaHeight);
       const profile = computeRangeProfile(slice, null, null, bins);
       if (!profile) return null;
@@ -344,159 +366,9 @@ function CandlesChart({
     visibleWindow,
     autoDayProfile,
     autoWeekProfile,
-    autoSessionProfile
-  ]);
-
-  // прямоугольник текущего выделения в координатах canvas (x0/x1/y0/y1!)
-  const selectionBox = useMemo(() => {
-    if (!geometry || !selectionRange || visibleWindow.visibleCandles.length === 0)
-      return null;
-
-    const { converters, layout } = geometry;
-    const startGlobal = Math.max(
-      0,
-      Math.min(selectionRange.start, selectionRange.end)
-    );
-    const endGlobal = Math.max(selectionRange.start, selectionRange.end);
-
-    const lastVisibleGlobal = visibleWindow.endIndex - 1;
-    if (lastVisibleGlobal < visibleWindow.startIndex) return null;
-
-    if (
-      endGlobal < visibleWindow.startIndex ||
-      startGlobal > lastVisibleGlobal
-    ) {
-      return null;
-    }
-
-    const lastLocal = Math.max(visibleWindow.visibleCandles.length - 1, 0);
-    const startLocal = clamp(
-      startGlobal - visibleWindow.startIndex,
-      0,
-      lastLocal
-    );
-    const endLocal = clamp(
-      endGlobal - visibleWindow.startIndex,
-      0,
-      lastLocal
-    );
-
-    const left = Math.min(startLocal, endLocal);
-    const right = Math.max(startLocal, endLocal);
-
-    const x0 = converters.indexToX(left) - geometry.layout.candleWidth / 2;
-    const x1 = converters.indexToX(right) + geometry.layout.candleWidth / 2;
-
-    return {
-      x0,
-      x1,
-      y0: geometry.layout.priceTop,
-      y1: geometry.layout.priceBottom
-    };
-  }, [geometry, selectionRange, visibleWindow]);
-
-  // при нажатии "Закрепить" добавляем текущий диапазон в fixedRanges
-  useEffect(() => {
-    if (!rangePinRequestId) return;
-    if (!selectionRange || !candles || !candles.length) return;
-
-    const start = Math.max(
-      0,
-      Math.min(selectionRange.start, selectionRange.end)
-    );
-    const end = Math.min(
-      candles.length - 1,
-      Math.max(selectionRange.start, selectionRange.end)
-    );
-    if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) {
-      return;
-    }
-
-    setFixedRanges((prev) => [
-      ...prev,
-      { id: `${rangePinRequestId}-${Date.now()}`, start, end }
-    ]);
-
-    // очищаем активное выделение, чтобы не оставался зелёный профиль
-    setSelectionRange(null);
-  }, [rangePinRequestId, selectionRange, candles]);
-
-  // считаем профили и прямоугольники для закреплённых диапазонов
-  const fixedProfiles = useMemo(() => {
-    if (!geometry || !candles || !candles.length || !fixedRanges.length) return [];
-
-    const { converters, layout } = geometry;
-    const lastVisibleGlobal = visibleWindow.endIndex - 1;
-    if (lastVisibleGlobal < visibleWindow.startIndex) return [];
-
-    const lastLocal = Math.max(visibleWindow.visibleCandles.length - 1, 0);
-
-    return fixedRanges
-      .map((range) => {
-        const startGlobal = Math.max(0, Math.min(range.start, range.end));
-        const endGlobal = Math.min(
-          candles.length - 1,
-          Math.max(range.start, range.end)
-        );
-        if (startGlobal >= endGlobal) return null;
-
-        // полностью вне экрана — не рисуем
-        if (
-          endGlobal < visibleWindow.startIndex ||
-          startGlobal > lastVisibleGlobal
-        ) {
-          return null;
-        }
-
-        const startLocal = clamp(
-          startGlobal - visibleWindow.startIndex,
-          0,
-          lastLocal
-        );
-        const endLocal = clamp(
-          endGlobal - visibleWindow.startIndex,
-          0,
-          lastLocal
-        );
-
-        const left = Math.min(startLocal, endLocal);
-        const right = Math.max(startLocal, endLocal);
-
-        const x0 = converters.indexToX(left) - layout.candleWidth / 2;
-        const x1 = converters.indexToX(right) + layout.candleWidth / 2;
-
-        const box = {
-          x0,
-          x1,
-          y0: layout.priceTop,
-          y1: layout.priceBottom
-        };
-
-        const sliceStart = Math.max(0, startGlobal);
-        const sliceEnd = Math.min(candles.length, endGlobal + 1);
-        const candlesSlice = candles.slice(sliceStart, sliceEnd);
-
-        const bins = estimateRangeBins(
-          candlesSlice.length,
-          layout.priceBottom - layout.priceTop
-        );
-
-        const profile = computeRangeProfile(
-          candlesSlice,
-          null,
-          null,
-          bins
-        );
-        if (!profile) return null;
-
-        return { id: range.id, box, profile };
-      })
-      .filter(Boolean);
-  }, [
-    geometry,
-    candles,
-    fixedRanges,
-    visibleWindow
+    autoSessionProfile,
+    autoMonthProfile,
+    autoVisibleProfile
   ]);
 
   // отрисовка
@@ -521,6 +393,23 @@ function CandlesChart({
     // сетка
     drawGrid(ctx, geometry, priceStats, visibleWindow.visibleCandles);
 
+    // авто-профили (день / неделя / сессия / месяц / видимый диапазон)
+    autoProfiles.forEach(({ box, profile, type }) => {
+      if (!autoProfileFlags[type]) return;
+
+      const colors = AUTO_PROFILE_STYLES[type] || {
+        fill: 'rgba(255, 255, 255, 0.06)',
+        profile: 'rgba(255, 255, 255, 0.8)'
+      };
+
+      renderRangeProfileInBox(ctx, profile, geometry, box, {
+        profileColor: colors.profile,
+        fillColor: colors.fill,
+        vaColor: strengthen(colors.fill, 0.26),
+        pocColor: 'rgba(255, 255, 255, 0.9)'
+      });
+    });
+
     // свечи + объёмы
     renderCandles(
       ctx,
@@ -539,52 +428,6 @@ function CandlesChart({
         profileVisible,
         profileWidth,
         showPoc: profileShowPoc
-      });
-    }
-
-    // авто-профили (день / неделя / сессия)
-    autoProfiles.forEach(({ box, profile, type }) => {
-      const colors = AUTO_PROFILE_STYLES[type] || {
-        fill: 'rgba(255, 255, 255, 0.06)',
-        profile: 'rgba(255, 255, 255, 0.9)'
-      };
-
-      ctx.save();
-      ctx.fillStyle = colors.fill;
-      ctx.fillRect(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0);
-      ctx.restore();
-
-      renderRangeProfileInBox(ctx, profile, geometry, box, {
-        profileColor: colors.profile
-      });
-    });
-
-    // закреплённые Range-профили (синие)
-    fixedProfiles.forEach(({ box, profile }) => {
-      ctx.save();
-      ctx.fillStyle = 'rgba(37, 99, 235, 0.10)';
-      ctx.fillRect(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0);
-      ctx.restore();
-
-      renderRangeProfileInBox(ctx, profile, geometry, box, {
-        profileColor: 'rgba(59, 130, 246, 0.85)'
-      });
-    });
-
-    // активный Range-профиль (зелёный)
-    if (rangeProfileEnabled && selectionBox && rangeProfile) {
-      ctx.save();
-      ctx.fillStyle = 'rgba(22, 163, 74, 0.10)';
-      ctx.fillRect(
-        selectionBox.x0,
-        selectionBox.y0,
-        selectionBox.x1 - selectionBox.x0,
-        selectionBox.y1 - selectionBox.y0
-      );
-      ctx.restore();
-
-      renderRangeProfileInBox(ctx, rangeProfile, geometry, selectionBox, {
-        profileColor: profileColor || '#16a34a'
       });
     }
 
@@ -618,8 +461,6 @@ function CandlesChart({
     priceStats,
     visibleWindow,
     mainProfile,
-    selectionBox,
-    rangeProfile,
     profileColor,
     profilePocColor,
     profileVaOpacity,
@@ -628,9 +469,8 @@ function CandlesChart({
     profileShowPoc,
     crosshair,
     candles,
-    rangeProfileEnabled,
-    fixedProfiles,
-    autoProfiles
+    autoProfiles,
+    autoProfileFlags
   ]);
 
   // зум колесом
@@ -654,8 +494,7 @@ function CandlesChart({
       dragRef.current = {
         type: 'cross',
         startX: x,
-        startOffset: rightOffset,
-        startIndex: null
+        startOffset: rightOffset
       };
       return;
     }
@@ -664,25 +503,17 @@ function CandlesChart({
       dragRef.current = {
         type: 'pan',
         startX: x,
-        startOffset: rightOffset,
-        startIndex: null
+        startOffset: rightOffset
       };
       return;
     }
 
     if (e.button === 0) {
-      const startIndex = pickGlobalIndexFromX(
-        x,
-        geometry,
-        visibleWindow.startIndex,
-        visibleWindow.total
-      );
-      setSelectionRange({ start: startIndex, end: startIndex });
+      setCrosshair({ visible: true, x, y });
       dragRef.current = {
-        type: 'select',
+        type: 'cross',
         startX: x,
-        startOffset: rightOffset,
-        startIndex
+        startOffset: rightOffset
       };
       return;
     }
@@ -714,21 +545,6 @@ function CandlesChart({
       return;
     }
 
-    if (drag.type === 'select') {
-      const currentIndex = pickGlobalIndexFromX(
-        x,
-        geometry,
-        visibleWindow.startIndex,
-        visibleWindow.total
-      );
-      setSelectionRange({
-        start: drag.startIndex,
-        end: currentIndex
-      });
-      setCrosshair({ visible: true, x, y });
-      return;
-    }
-
     if (drag.type === 'cross') {
       setCrosshair({ visible: true, x, y });
       return;
@@ -743,8 +559,7 @@ function CandlesChart({
     dragRef.current = {
       type: null,
       startX: 0,
-      startOffset: 0,
-      startIndex: null
+      startOffset: 0
     };
   }
 
@@ -756,8 +571,7 @@ function CandlesChart({
     dragRef.current = {
       type: null,
       startX: 0,
-      startOffset: 0,
-      startIndex: null
+      startOffset: 0
     };
   }
 
