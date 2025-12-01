@@ -391,6 +391,9 @@ function CandlesChart({
       ...prev,
       { id: `${rangePinRequestId}-${Date.now()}`, start, end }
     ]);
+
+    // очищаем активное выделение, чтобы не оставался зелёный профиль
+    setSelectionRange(null);
   }, [rangePinRequestId, selectionRange, candles]);
 
   // считаем профили и прямоугольники для закреплённых диапазонов

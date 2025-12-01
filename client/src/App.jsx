@@ -18,6 +18,57 @@ const INSTRUMENTS = [
   'PLZL'
 ];
 
+function ToolbarDropdown({ label, children, minWidth = 280 }) {
+  return (
+    <details
+      style={{
+        position: 'relative',
+        display: 'inline-block',
+        backgroundColor: '#0b1020',
+        border: '1px solid #111827',
+        borderRadius: 6,
+        padding: '4px 10px',
+        color: '#e5e9f0'
+      }}
+    >
+      <summary
+        style={{
+          cursor: 'pointer',
+          listStyle: 'none',
+          userSelect: 'none',
+          outline: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          fontSize: 13
+        }}
+      >
+        <span>{label}</span>
+        <span style={{ color: '#9ca3af', fontSize: 12 }}>▼</span>
+      </summary>
+      <div
+        style={{
+          position: 'absolute',
+          top: 'calc(100% + 6px)',
+          left: 0,
+          zIndex: 20,
+          minWidth,
+          background: 'linear-gradient(180deg, #0b1020, #0f172a)',
+          border: '1px solid #111827',
+          borderRadius: 8,
+          padding: 12,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8
+        }}
+      >
+        {children}
+      </div>
+    </details>
+  );
+}
+
 function App() {
   const [symbol, setSymbol] = useState('SBER');
   const [timeframe, setTimeframe] = useState('1d');
@@ -150,209 +201,228 @@ function App() {
           </select>
         </label>
 
-        {/* Настройки основного профиля */}
-        <label
-          style={{
-            fontSize: '13px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={profileVisible}
-            onChange={(e) => setProfileVisible(e.target.checked)}
-          />
-          Профиль
-        </label>
-
-        <label style={{ fontSize: '13px' }}>
-          шаг:&nbsp;
-          <select
-            value={profileStepMode}
-            onChange={(e) => setProfileStepMode(e.target.value)}
+        <ToolbarDropdown label="Профиль">
+          <div
             style={{
-              backgroundColor: '#1b1f27',
-              border: '1px solid #3b4252',
-              color: '#e5e9f0',
-              padding: '2px 4px',
-              fontSize: '13px'
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: 10
             }}
           >
-            <option value="auto">auto</option>
-            <option value="50">≈50 уровней</option>
-            <option value="100">≈100 уровней</option>
-          </select>
-        </label>
+            <label
+              style={{
+                fontSize: '13px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={profileVisible}
+                onChange={(e) => setProfileVisible(e.target.checked)}
+              />
+              Показывать профиль
+            </label>
 
-        <label
-          style={{
-            fontSize: '13px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4
-          }}
-        >
-          цвет:&nbsp;
-          <input
-            type="color"
-            value={profileColor}
-            onChange={(e) => setProfileColor(e.target.value)}
+            <label style={{ fontSize: '13px' }}>
+              шаг:&nbsp;
+              <select
+                value={profileStepMode}
+                onChange={(e) => setProfileStepMode(e.target.value)}
+                style={{
+                  backgroundColor: '#1b1f27',
+                  border: '1px solid #3b4252',
+                  color: '#e5e9f0',
+                  padding: '2px 4px',
+                  fontSize: '13px',
+                  width: '100%'
+                }}
+              >
+                <option value="auto">auto</option>
+                <option value="50">≈50 уровней</option>
+                <option value="100">≈100 уровней</option>
+              </select>
+            </label>
+
+            <label
+              style={{
+                fontSize: '13px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6
+              }}
+            >
+              цвет:&nbsp;
+              <input
+                type="color"
+                value={profileColor}
+                onChange={(e) => setProfileColor(e.target.value)}
+                style={{
+                  width: 30,
+                  height: 20,
+                  padding: 0,
+                  border: '1px solid #3b4252',
+                  background: '#1b1f27'
+                }}
+              />
+            </label>
+
+            <label
+              style={{
+                fontSize: '13px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                flexWrap: 'wrap'
+              }}
+            >
+              POC:&nbsp;
+              <input
+                type="checkbox"
+                checked={profileShowPoc}
+                onChange={(e) => setProfileShowPoc(e.target.checked)}
+              />
+              <span style={{ color: '#9ca3af' }}>цвет:</span>
+              <input
+                type="color"
+                value={profilePocColor}
+                onChange={(e) => setProfilePocColor(e.target.value)}
+                style={{
+                  width: 30,
+                  height: 20,
+                  padding: 0,
+                  border: '1px solid #3b4252',
+                  background: '#1b1f27'
+                }}
+              />
+            </label>
+
+            <label
+              style={{
+                fontSize: '13px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8
+              }}
+            >
+              VA:&nbsp;
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={profileVaOpacity}
+                onChange={(e) =>
+                  setProfileVaOpacity(parseFloat(e.target.value))
+                }
+                style={{ flex: 1 }}
+              />
+            </label>
+
+            <label
+              style={{
+                fontSize: '13px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8
+              }}
+            >
+              ширина:&nbsp;
+              <input
+                type="range"
+                min="40"
+                max="160"
+                step="5"
+                value={profileWidth}
+                onChange={(e) =>
+                  setProfileWidth(parseInt(e.target.value, 10))
+                }
+                style={{ flex: 1 }}
+              />
+            </label>
+          </div>
+        </ToolbarDropdown>
+
+        <ToolbarDropdown label="Диапазоны" minWidth={320}>
+          <div
             style={{
-              width: 26,
-              height: 18,
-              padding: 0,
-              border: '1px solid #3b4252',
-              background: '#1b1f27'
+              display: 'flex',
+              gap: 10,
+              flexWrap: 'wrap',
+              alignItems: 'center'
             }}
-          />
-        </label>
+          >
+            <label
+              style={{
+                fontSize: '13px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={rangeProfileEnabled}
+                onChange={(e) => setRangeProfileEnabled(e.target.checked)}
+              />
+              Range профиль
+            </label>
 
-        <label
-          style={{
-            fontSize: '13px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4
-          }}
-        >
-          POC:&nbsp;
-          <input
-            type="checkbox"
-            checked={profileShowPoc}
-            onChange={(e) => setProfileShowPoc(e.target.checked)}
-          />
-          &nbsp;цвет:&nbsp;
-          <input
-            type="color"
-            value={profilePocColor}
-            onChange={(e) => setProfilePocColor(e.target.value)}
+            <button
+              onClick={() =>
+                setRangePinRequestId((prev) => prev + 1)
+              }
+              disabled={!rangeProfileEnabled}
+              style={{
+                fontSize: '13px',
+                padding: '4px 10px',
+                borderRadius: 5,
+                border: '1px solid #4b5563',
+                backgroundColor: rangeProfileEnabled ? '#1f2937' : '#111827',
+                color: '#e5e9f0',
+                cursor: rangeProfileEnabled ? 'pointer' : 'default'
+              }}
+            >
+              Закрепить выделение
+            </button>
+          </div>
+
+          <div
             style={{
-              width: 26,
-              height: 18,
-              padding: 0,
-              border: '1px solid #3b4252',
-              background: '#1b1f27'
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              flexWrap: 'wrap'
             }}
-          />
-        </label>
-
-        <label
-          style={{
-            fontSize: '13px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4
-          }}
-        >
-          VA:&nbsp;
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            value={profileVaOpacity}
-            onChange={(e) =>
-              setProfileVaOpacity(parseFloat(e.target.value))
-            }
-          />
-        </label>
-
-        <label
-          style={{
-            fontSize: '13px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4
-          }}
-        >
-          ширина:&nbsp;
-          <input
-            type="range"
-            min="40"
-            max="160"
-            step="5"
-            value={profileWidth}
-            onChange={(e) =>
-              setProfileWidth(parseInt(e.target.value, 10))
-            }
-          />
-        </label>
-
-        {/* Range-профиль + кнопка закрепления */}
-        <label
-          style={{
-            fontSize: '13px',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={rangeProfileEnabled}
-            onChange={(e) => setRangeProfileEnabled(e.target.checked)}
-          />
-          Range профиль
-        </label>
-
-        <button
-          onClick={() =>
-            setRangePinRequestId((prev) => prev + 1)
-          }
-          disabled={!rangeProfileEnabled}
-          style={{
-            fontSize: '13px',
-            padding: '4px 8px',
-            borderRadius: 4,
-            border: '1px solid #4b5563',
-            backgroundColor: rangeProfileEnabled ? '#1f2937' : '#111827',
-            color: '#e5e9f0',
-            cursor: rangeProfileEnabled ? 'pointer' : 'default'
-          }}
-        >
-          Закрепить
-        </button>
-
-        {/* Авто-профили */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            padding: '4px 8px',
-            borderRadius: 6,
-            backgroundColor: '#0b1020',
-            border: '1px solid #111827'
-          }}
-        >
-          <span style={{ fontSize: 13, color: '#9ca3af' }}>Авто-профили:</span>
-          <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
-            <input
-              type="checkbox"
-              checked={autoDayProfile}
-              onChange={(e) => setAutoDayProfile(e.target.checked)}
-            />
-            День
-          </label>
-          <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
-            <input
-              type="checkbox"
-              checked={autoWeekProfile}
-              onChange={(e) => setAutoWeekProfile(e.target.checked)}
-            />
-            Неделя
-          </label>
-          <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
-            <input
-              type="checkbox"
-              checked={autoSessionProfile}
-              onChange={(e) => setAutoSessionProfile(e.target.checked)}
-            />
-            Сессия
-          </label>
-        </div>
+          >
+            <span style={{ fontSize: 13, color: '#9ca3af' }}>Авто-профили:</span>
+            <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <input
+                type="checkbox"
+                checked={autoDayProfile}
+                onChange={(e) => setAutoDayProfile(e.target.checked)}
+              />
+              День
+            </label>
+            <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <input
+                type="checkbox"
+                checked={autoWeekProfile}
+                onChange={(e) => setAutoWeekProfile(e.target.checked)}
+              />
+              Неделя
+            </label>
+            <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
+              <input
+                type="checkbox"
+                checked={autoSessionProfile}
+                onChange={(e) => setAutoSessionProfile(e.target.checked)}
+              />
+              Сессия
+            </label>
+          </div>
+        </ToolbarDropdown>
 
         {/* Кнопка принудительного обновления */}
         <button
