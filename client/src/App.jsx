@@ -40,6 +40,9 @@ function App() {
   // Показывать ли POC (линия + жирная ступенька)
   const [profileShowPoc, setProfileShowPoc] = useState(true);
 
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+  const api = axios.create({ baseURL: API_BASE_URL });
+
   // Range-профиль (по выделенному диапазону)
   const [rangeProfileEnabled, setRangeProfileEnabled] = useState(true);
   // Сигнал «закрепить текущий Range-профиль»
@@ -53,7 +56,7 @@ function App() {
         setCandlesInfo(null);
       }
 
-      const response = await axios.get('http://localhost:3000/api/candles', {
+      const response = await api.get('/api/candles', {
         params: {
           symbol: sym.trim(),
           tf
@@ -63,15 +66,16 @@ function App() {
       setCandlesInfo(response.data);
     } catch (err) {
       console.error(err);
-      setError(err?.response?.data?.message || err.message || 'Ошибка загрузки');
+      setError(
+        err?.response?.data?.details ||
+          err?.response?.data?.message ||
+          err.message ||
+          'Ошибка загрузки'
+      );
     } finally {
       setLoading(false);
     }
   }
-
-  useEffect(() => {
-    fetchCandles(symbol, timeframe, { preserveOld: false });
-  }, []); // один раз при старте
 
   // Если меняем инструмент/таймфрейм — перезапрашиваем данные
   useEffect(() => {
