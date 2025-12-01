@@ -56,7 +56,9 @@ export function computeMainProfile(
 
   let maxVol = 0;
   let pocIndex = 0;
+  let totalVolume = 0;
   resultBins.forEach((b, i) => {
+    totalVolume += b.volume;
     if (b.volume > maxVol) {
       maxVol = b.volume;
       pocIndex = i;
@@ -67,10 +69,53 @@ export function computeMainProfile(
     return null;
   }
 
+  // считаем зону Value Area (~70% объёма вокруг POC)
+  let vaLowPrice = null;
+  let vaHighPrice = null;
+  if (totalVolume > 0 && resultBins.length > 1) {
+    const target = totalVolume * 0.7;
+    let acc = maxVol;
+    let left = pocIndex;
+    let right = pocIndex;
+    while (acc < target && (left > 0 || right < resultBins.length - 1)) {
+      const nextLeft = left > 0 ? resultBins[left - 1].volume : 0;
+      const nextRight =
+        right < resultBins.length - 1 ? resultBins[right + 1].volume : 0;
+
+      if (nextLeft >= nextRight) {
+        if (left > 0) {
+          left -= 1;
+          acc += nextLeft;
+        } else if (right < resultBins.length - 1) {
+          right += 1;
+          acc += nextRight;
+        } else {
+          break;
+        }
+      } else {
+        if (right < resultBins.length - 1) {
+          right += 1;
+          acc += nextRight;
+        } else if (left > 0) {
+          left -= 1;
+          acc += nextLeft;
+        } else {
+          break;
+        }
+      }
+    }
+
+    vaLowPrice = resultBins[left].price;
+    vaHighPrice = resultBins[right].price + step;
+  }
+
   return {
     bins: resultBins,
     pocIndex,
-    maxVol
+    maxVol,
+    totalVolume,
+    vaLowPrice,
+    vaHighPrice
   };
 }
 
@@ -82,31 +127,65 @@ export function renderMainProfile(ctx, mainProfile, geometry, options = {}) {
   const converters = geometry.converters;
   if (!layout || !converters) return;
 
-  const { bins, pocIndex, maxVol } = mainProfile;
+  const { bins, pocIndex, maxVol, vaLowPrice, vaHighPrice } = mainProfile;
   if (!Array.isArray(bins) || bins.length === 0) return;
 
-  const {
-    paddingLeft,
-    priceScaleX,
-    priceTop,
-    priceBottom
-  } = layout;
+  const { paddingLeft, priceScaleX, priceTop, priceBottom } = layout;
 
   const priceHeight = priceBottom - priceTop;
   if (!Number.isFinite(priceHeight) || priceHeight <= 0) return;
 
-  // ширина профиля внутри ценового окна (процент от ширины графика)
-  const widthFactor = 0.26; // 26% ширины области свечей
   const priceWidth = priceScaleX - paddingLeft;
-  const profileMaxWidth = priceWidth * widthFactor;
+  if (!Number.isFinite(priceWidth) || priceWidth <= 0) return;
+
+  let profileMaxWidth;
+  const widthOption = options.profileWidth;
+  if (Number.isFinite(widthOption)) {
+    const maxAllowed = priceWidth * 0.5;
+    const minAllowed = Math.min(priceWidth * 0.8, 20);
+    profileMaxWidth = Math.max(minAllowed, Math.min(widthOption, maxAllowed));
+  } else {
+    const widthFactor = 0.26; // по умолчанию ~26% ширины области свечей
+    profileMaxWidth = priceWidth * widthFactor;
+  }
   if (!Number.isFinite(profileMaxWidth) || profileMaxWidth <= 0) return;
 
   const baseColor =
     options.profileColor || 'rgba(76, 111, 255, 0.55)'; // один цвет
   const pocColor = options.profilePocColor || '#F7D447';
   const barHeight = 8;
+  const vaOpacity =
+    typeof options.profileVaOpacity === 'number'
+      ? options.profileVaOpacity
+      : 0;
 
   ctx.save();
+
+  // зона Value Area (простая заливка по цене)
+  if (
+    vaOpacity > 0 &&
+    Number.isFinite(vaLowPrice) &&
+    Number.isFinite(vaHighPrice)
+  ) {
+    const yLow = converters.priceToY(vaLowPrice);
+    const yHigh = converters.priceToY(vaHighPrice);
+    const yTopVa = Math.min(yLow, yHigh);
+    const yBottomVa = Math.max(yLow, yHigh);
+    const hVa = yBottomVa - yTopVa;
+
+    if (hVa > 0) {
+      const clampedOpacity = Math.max(0, Math.min(vaOpacity, 1));
+      ctx.globalAlpha = clampedOpacity;
+      ctx.fillStyle = '#1f2933';
+      ctx.fillRect(
+        paddingLeft,
+        yTopVa,
+        priceScaleX - paddingLeft,
+        hVa
+      );
+      ctx.globalAlpha = 1;
+    }
+  }
 
   // единый цвет по всему профилю
   bins.forEach((b, i) => {
@@ -115,15 +194,15 @@ export function renderMainProfile(ctx, mainProfile, geometry, options = {}) {
     const barW = (b.volume / maxVol) * profileMaxWidth;
 
     const barWidthClamped = Math.max(0, Math.min(barW, profileMaxWidth));
-    const xEnd = priceScaleX;          // правая граница ценового окна
+    const xEnd = priceScaleX; // правая граница ценового окна
     const xStart = xEnd - barWidthClamped;
 
     ctx.fillStyle = baseColor;
     ctx.fillRect(xStart, y - barHeight / 2, barWidthClamped, barHeight);
   });
 
-  // подчёркиваем POC отдельно:
-  if (bins[pocIndex]) {
+  // подчёркиваем POC отдельно (если включён)
+  if (options.showPoc !== false && bins[pocIndex]) {
     const pocPrice = bins[pocIndex].price;
     const pocY = converters.priceToY(pocPrice);
 

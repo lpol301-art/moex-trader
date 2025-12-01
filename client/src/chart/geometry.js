@@ -89,11 +89,25 @@ export function buildGeometry({
   const paddingBottom = 28;
   const paddingLeft = 48;
 
+  // максимальная "теоретическая" ширина профиля (для настроек и будущих фич)
   const profileWidthClamped = clamp(Math.max(40, profileWidth || 80), 40, 200);
+
+  // ширина ценовой шкалы
   const priceScaleWidth = 62;
 
-  const rightTotal = priceScaleWidth + profileWidthClamped + 10;
-  const chartRight = safeWidth - rightTotal;
+  // небольшой отступ справа от шкалы до края канваса
+  const rightPadding = 10;
+
+  // правая граница шкалы (почти край канваса)
+  const priceScaleRight = safeWidth - rightPadding;
+
+  // X, где начинается ценовая шкала
+  const priceScaleX = priceScaleRight - priceScaleWidth;
+
+  // ВАЖНО: теперь окно графика (свечи) тянется прямо до ценовой шкалы
+  const chartRight = priceScaleX;
+
+  // ширина области свечей (от левого отступа до шкалы)
   const fullChartWidth = Math.max(100, chartRight - paddingLeft);
 
   const fullChartHeight = safeHeight - paddingTop - paddingBottom;
@@ -152,9 +166,14 @@ export function buildGeometry({
       paddingBottom,
       chartRight,
       fullChartWidth,
-      profileLeft: chartRight + 4,
-      profileRight: chartRight + 4 + profileWidthClamped - 8,
-      priceScaleX: chartRight + 4 + profileWidthClamped - 8 + 6,
+
+      // "виртуальная" область профиля — теперь ВНУТРИ окна графика,
+      // прижата к правому краю ценового окна
+      profileLeft: Math.max(paddingLeft, chartRight - profileWidthClamped),
+      profileRight: chartRight,
+
+      // X начала ценовой шкалы (левый край шкалы)
+      priceScaleX,
       priceTop,
       priceBottom,
       volumeTop,

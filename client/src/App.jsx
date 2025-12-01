@@ -37,9 +37,13 @@ function App() {
   const [profileVaOpacity, setProfileVaOpacity] = useState(0.4);
   // Ширина блока профиля (толщина)
   const [profileWidth, setProfileWidth] = useState(80);
+  // Показывать ли POC (линия + жирная ступенька)
+  const [profileShowPoc, setProfileShowPoc] = useState(true);
 
   // Range-профиль (по выделенному диапазону)
   const [rangeProfileEnabled, setRangeProfileEnabled] = useState(true);
+  // Сигнал «закрепить текущий Range-профиль»
+  const [rangePinRequestId, setRangePinRequestId] = useState(0);
 
   async function fetchCandles(sym, tf, { preserveOld = true } = {}) {
     try {
@@ -58,68 +62,66 @@ function App() {
 
       setCandlesInfo(response.data);
     } catch (err) {
-      console.error('Error loading candles:', err);
-      setError(err.response?.data?.details || err.message || 'Unknown error');
+      console.error(err);
+      setError(err?.response?.data?.message || err.message || 'Ошибка загрузки');
     } finally {
       setLoading(false);
     }
   }
 
-  // Автоматическая загрузка/перезагрузка при изменении symbol или timeframe
   useEffect(() => {
-    const sym = symbol;
-    const tf = timeframe;
+    fetchCandles(symbol, timeframe, { preserveOld: false });
+  }, []); // один раз при старте
 
-    const timerId = setTimeout(() => {
-      fetchCandles(sym, tf, { preserveOld: true });
-    }, 400);
-
-    return () => clearTimeout(timerId);
+  // Если меняем инструмент/таймфрейм — перезапрашиваем данные
+  useEffect(() => {
+    fetchCandles(symbol, timeframe, { preserveOld: false });
   }, [symbol, timeframe]);
 
   return (
     <div
       style={{
-        height: '100%',
-        overflow: 'hidden',
+        width: '100vw',
+        height: '100vh',
         display: 'flex',
         flexDirection: 'column',
-        fontFamily: 'sans-serif',
-        backgroundColor: '#111317',
-        color: '#e5e9f0'
+        backgroundColor: '#020617',
+        color: '#e5e9f0',
+        fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
+        fontSize: '14px'
       }}
     >
-      {/* Верхняя панель управления */}
+      {/* Верхняя панель: выбор инструмента, ТФ, настройки */}
       <div
         style={{
-          padding: '8px 16px',
-          borderBottom: '1px solid #242933',
+          padding: '8px 12px',
+          borderBottom: '1px solid #111827',
           display: 'flex',
-          gap: '8px',
           alignItems: 'center',
-          flexWrap: 'wrap',
-          flexShrink: 0
+          gap: 12,
+          background:
+            'linear-gradient(to right, rgba(15,23,42,0.95), rgba(15,23,42,0.85))',
+          boxShadow: '0 1px 0 rgba(15,23,42,0.9)'
         }}
       >
-        <h1 style={{ margin: 0, fontSize: '16px' }}>MOEX Viewer (черновик)</h1>
-
+        {/* Инструмент */}
         <label style={{ fontSize: '13px' }}>
-          &nbsp;Инструмент:&nbsp;
+          Инструмент:&nbsp;
           <input
-            type="text"
             value={symbol}
             onChange={(e) => setSymbol(e.target.value.toUpperCase())}
             style={{
-              width: '80px',
-              backgroundColor: '#1b1f27',
-              border: '1px solid #3b4252',
-              color: '#e5e9f0',
+              width: 80,
+              backgroundColor: '#020617',
+              border: '1px solid #1f2937',
+              borderRadius: 4,
               padding: '2px 4px',
-              fontSize: '13px'
+              color: '#e5e9f0'
             }}
           />
         </label>
 
+        {/* Таймфрейм */}
         <label style={{ fontSize: '13px' }}>
           &nbsp;Таймфрейм:&nbsp;
           <select
@@ -208,6 +210,12 @@ function App() {
         >
           POC:&nbsp;
           <input
+            type="checkbox"
+            checked={profileShowPoc}
+            onChange={(e) => setProfileShowPoc(e.target.checked)}
+          />
+          &nbsp;цвет:&nbsp;
+          <input
             type="color"
             value={profilePocColor}
             onChange={(e) => setProfilePocColor(e.target.value)}
@@ -236,7 +244,9 @@ function App() {
             max="1"
             step="0.05"
             value={profileVaOpacity}
-            onChange={(e) => setProfileVaOpacity(parseFloat(e.target.value))}
+            onChange={(e) =>
+              setProfileVaOpacity(parseFloat(e.target.value))
+            }
           />
         </label>
 
@@ -255,11 +265,13 @@ function App() {
             max="160"
             step="5"
             value={profileWidth}
-            onChange={(e) => setProfileWidth(parseInt(e.target.value, 10))}
+            onChange={(e) =>
+              setProfileWidth(parseInt(e.target.value, 10))
+            }
           />
         </label>
 
-        {/* Range-профиль */}
+        {/* Range-профиль + кнопка закрепления */}
         <label
           style={{
             fontSize: '13px',
@@ -273,19 +285,39 @@ function App() {
             checked={rangeProfileEnabled}
             onChange={(e) => setRangeProfileEnabled(e.target.checked)}
           />
-          Range проф.
+          Range профиль
         </label>
 
+        <button
+          onClick={() =>
+            setRangePinRequestId((prev) => prev + 1)
+          }
+          disabled={!rangeProfileEnabled}
+          style={{
+            fontSize: '13px',
+            padding: '4px 8px',
+            borderRadius: 4,
+            border: '1px solid #4b5563',
+            backgroundColor: rangeProfileEnabled ? '#1f2937' : '#111827',
+            color: '#e5e9f0',
+            cursor: rangeProfileEnabled ? 'pointer' : 'default'
+          }}
+        >
+          Закрепить
+        </button>
+
+        {/* Кнопка принудительного обновления */}
         <button
           onClick={() => fetchCandles(symbol, timeframe, { preserveOld: false })}
           disabled={loading}
           style={{
-            padding: '4px 10px',
+            marginLeft: 'auto',
             fontSize: '13px',
-            backgroundColor: loading ? '#4c566a' : '#3b82f6',
-            border: 'none',
-            borderRadius: '3px',
-            color: '#fff',
+            padding: '4px 8px',
+            borderRadius: 4,
+            border: '1px solid #4b5563',
+            backgroundColor: loading ? '#111827' : '#1f2937',
+            color: '#e5e9f0',
             cursor: loading ? 'default' : 'pointer'
           }}
         >
@@ -317,40 +349,10 @@ function App() {
           flex: 1,
           minHeight: 0,
           display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden'
+          padding: '8px 8px 8px 8px',
+          gap: 8
         }}
       >
-        {/* Инфо под шапкой */}
-        {candlesInfo && (
-          <div
-            style={{
-              padding: '4px 16px',
-              fontSize: '12px',
-              color: '#d8dee9',
-              borderBottom: '1px solid #242933',
-              flexShrink: 0
-            }}
-          >
-            <span>
-              <strong>Инструмент:</strong> {candlesInfo.symbol}
-            </span>
-            &nbsp;|&nbsp;
-            <span>
-              <strong>Таймфрейм:</strong> {candlesInfo.timeframe}
-            </span>
-            &nbsp;|&nbsp;
-            <span>
-              <strong>Диапазон:</strong> {candlesInfo.from} →{' '}
-              {candlesInfo.till}
-            </span>
-            &nbsp;|&nbsp;
-            <span>
-              <strong>Свечей:</strong> {candlesInfo.candlesCount}
-            </span>
-          </div>
-        )}
-
         {/* Центр: слева график, справа список тикеров */}
         <div
           style={{
@@ -377,7 +379,9 @@ function App() {
                 profilePocColor={profilePocColor}
                 profileVaOpacity={profileVaOpacity}
                 profileWidth={profileWidth}
+                profileShowPoc={profileShowPoc}
                 rangeProfileEnabled={rangeProfileEnabled}
+                rangePinRequestId={rangePinRequestId}
               />
             ) : (
               <div
@@ -387,32 +391,29 @@ function App() {
                   alignItems: 'center',
                   justifyContent: 'center',
                   color: '#6b7280',
-                  fontSize: '14px'
+                  fontSize: '13px'
                 }}
               >
-                {loading
-                  ? 'Загружаю данные...'
-                  : 'Нет данных — выбери инструмент/таймфрейм'}
+                Нет данных для отображения
               </div>
             )}
           </div>
 
-          {/* Правая область — список инструментов */}
+          {/* Правая колонка — список базовых тикеров */}
           <div
             style={{
-              width: '140px',
-              borderLeft: '1px solid #242933',
-              backgroundColor: '#06080c',
-              padding: '6px 4px',
-              fontSize: '12px',
-              flexShrink: 0,
-              overflowY: 'auto'
+              width: 120,
+              borderLeft: '1px solid #111827',
+              paddingLeft: 6,
+              paddingRight: 4,
+              display: 'flex',
+              flexDirection: 'column',
+              overflowY: 'auto',
+              fontSize: '13px'
             }}
           >
             <div
               style={{
-                fontWeight: 'bold',
-                marginBottom: '4px',
                 padding: '2px 4px',
                 color: '#9ca3af'
               }}

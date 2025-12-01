@@ -25,13 +25,15 @@ import {
 
 function CandlesChart({
   candles,
-  profileStepMode,      // пока не используем, просто пробрасываем
+  profileStepMode,
   profileVisible,
   profileColor,
   profilePocColor,
   profileVaOpacity,
   profileWidth,
-  rangeProfileEnabled    // чекбокс "Range проф."
+  profileShowPoc,
+  rangeProfileEnabled,
+  rangePinRequestId
 }) {
   const wrapperRef = useRef(null);
   const canvasRef = useRef(null);
@@ -39,11 +41,16 @@ function CandlesChart({
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [barsPerScreen, setBarsPerScreen] = useState(140);
   const [rightOffset, setRightOffset] = useState(0);
+
+  // текущее живое выделение
   const [selectionRange, setSelectionRange] = useState(null);
+  // закреплённые диапазоны (по индексам свечей)
+  const [fixedRanges, setFixedRanges] = useState([]);
+
   const [crosshair, setCrosshair] = useState({ visible: false, x: 0, y: 0 });
 
   const dragRef = useRef({
-    type: null, // 'pan' | 'select' | 'cross'
+    type: null,
     startX: 0,
     startOffset: 0,
     startIndex: null
@@ -88,7 +95,7 @@ function CandlesChart({
       minPrice: priceStats.minPrice,
       maxPrice: priceStats.maxPrice,
       maxVolume: priceStats.maxVolume,
-      profileWidth // пока не используется напрямую для отрисовки, но пусть остаётся
+      profileWidth
     });
   }, [
     size.width,
@@ -104,22 +111,37 @@ function CandlesChart({
   const mainProfile = useMemo(() => {
     if (!geometry) return null;
 
+    const count = visibleWindow.visibleCandles.length;
+    if (!count) return null;
+
+    let bins;
+    if (profileStepMode === 'auto') {
+      const approx = Math.floor(count / 3);
+      bins = Math.min(120, Math.max(16, approx || 16));
+    } else {
+      const parsed = parseInt(profileStepMode, 10);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        bins = Math.min(200, Math.max(8, parsed));
+      } else {
+        bins = 32;
+      }
+    }
+
     return computeMainProfile(
       visibleWindow.visibleCandles,
       priceStats.minPrice,
       priceStats.maxPrice,
-      {
-        bins: 32
-      }
+      { bins }
     );
   }, [
     geometry,
     visibleWindow.visibleCandles,
     priceStats.minPrice,
-    priceStats.maxPrice
+    priceStats.maxPrice,
+    profileStepMode
   ]);
 
-  // свечи в диапазоне
+  // свечи в текущем диапазоне
   const rangeCandles = useMemo(() => {
     if (!selectionRange || !candles || !candles.length) return [];
     const start = Math.max(0, Math.min(selectionRange.start, selectionRange.end));
@@ -130,15 +152,14 @@ function CandlesChart({
     return candles.slice(start, end);
   }, [selectionRange, candles]);
 
-  // профиль диапазона
+  // профиль текущего диапазона
   const rangeProfile = useMemo(() => {
-    if (!geometry || !rangeCandles.length) return null;
-
+    if (!geometry || !rangeCandles.length || !rangeProfileEnabled) return null;
     return computeRangeProfile(
       rangeCandles,
       priceStats.minPrice,
       priceStats.maxPrice,
-      rangeProfileEnabled ? 24 : false
+      24
     );
   }, [
     geometry,
@@ -148,7 +169,7 @@ function CandlesChart({
     rangeProfileEnabled
   ]);
 
-  // прямоугольник выделения
+  // прямоугольник текущего выделения в координатах canvas (x0/x1/y0/y1!)
   const selectionBox = useMemo(() => {
     if (!geometry || !selectionRange || visibleWindow.visibleCandles.length === 0)
       return null;
@@ -173,18 +194,102 @@ function CandlesChart({
       visibleWindow.bars - 1
     );
 
-    const x0 = converters.indexToX(startLocal) - layout.candleWidth / 2;
-    const x1 = converters.indexToX(endLocal) + layout.candleWidth / 2;
+    const x0 = converters.indexToX(startLocal) - geometry.layout.candleWidth / 2;
+    const x1 = converters.indexToX(endLocal) + geometry.layout.candleWidth / 2;
 
     return {
       x0,
       x1,
-      y0: layout.priceTop,
-      y1: layout.priceBottom,
-      startLocal,
-      endLocal
+      y0: geometry.layout.priceTop,
+      y1: geometry.layout.priceBottom
     };
   }, [geometry, selectionRange, visibleWindow]);
+
+  // при нажатии "Закрепить" добавляем текущий диапазон в fixedRanges
+  useEffect(() => {
+    if (!rangePinRequestId) return;
+    if (!selectionRange || !candles || !candles.length) return;
+
+    const start = Math.max(
+      0,
+      Math.min(selectionRange.start, selectionRange.end)
+    );
+    const end = Math.min(
+      candles.length - 1,
+      Math.max(selectionRange.start, selectionRange.end)
+    );
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) {
+      return;
+    }
+
+    setFixedRanges((prev) => [
+      ...prev,
+      { id: `${rangePinRequestId}-${Date.now()}`, start, end }
+    ]);
+  }, [rangePinRequestId, selectionRange, candles]);
+
+  // считаем профили и прямоугольники для закреплённых диапазонов
+  const fixedProfiles = useMemo(() => {
+    if (!geometry || !candles || !candles.length || !fixedRanges.length) return [];
+
+    const { converters, layout } = geometry;
+
+    return fixedRanges
+      .map((range) => {
+        const startGlobal = Math.max(0, Math.min(range.start, range.end));
+        const endGlobal = Math.min(
+          candles.length - 1,
+          Math.max(range.start, range.end)
+        );
+        if (startGlobal >= endGlobal) return null;
+
+        // полностью вне экрана — не рисуем
+        if (
+          endGlobal < visibleWindow.startIndex ||
+          startGlobal > visibleWindow.endIndex
+        ) {
+          return null;
+        }
+
+        const startLocal = Math.max(startGlobal - visibleWindow.startIndex, 0);
+        const endLocal = Math.min(
+          endGlobal - visibleWindow.startIndex,
+          visibleWindow.bars - 1
+        );
+
+        const x0 = converters.indexToX(startLocal) - layout.candleWidth / 2;
+        const x1 = converters.indexToX(endLocal) + layout.candleWidth / 2;
+
+        const box = {
+          x0,
+          x1,
+          y0: layout.priceTop,
+          y1: layout.priceBottom
+        };
+
+        const sliceStart = Math.max(0, startGlobal);
+        const sliceEnd = Math.min(candles.length, endGlobal + 1);
+        const candlesSlice = candles.slice(sliceStart, sliceEnd);
+
+        const profile = computeRangeProfile(
+          candlesSlice,
+          priceStats.minPrice,
+          priceStats.maxPrice,
+          24
+        );
+        if (!profile) return null;
+
+        return { id: range.id, box, profile };
+      })
+      .filter(Boolean);
+  }, [
+    geometry,
+    candles,
+    fixedRanges,
+    priceStats.minPrice,
+    priceStats.maxPrice,
+    visibleWindow
+  ]);
 
   // отрисовка
   useEffect(() => {
@@ -217,25 +322,49 @@ function CandlesChart({
     );
     renderVolumes(ctx, visibleWindow.visibleCandles, geometry);
 
-    // основной профиль (только ВНУТРИ окна графика, поверх свечей)
+    // основной профиль
     if (mainProfile) {
       renderMainProfile(ctx, mainProfile, geometry, {
         profileColor,
         profilePocColor,
         profileVaOpacity,
-        profileVisible
+        profileVisible,
+        profileWidth,
+        showPoc: profileShowPoc
       });
     }
 
-    // профиль диапазона — ТОЛЬКО внутри прямоугольника
+    // закреплённые Range-профили (синие)
+    fixedProfiles.forEach(({ box, profile }) => {
+      ctx.save();
+      ctx.fillStyle = 'rgba(37, 99, 235, 0.10)';
+      ctx.fillRect(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0);
+      ctx.restore();
+
+      renderRangeProfileInBox(ctx, profile, geometry, box, {
+        profileColor: 'rgba(59, 130, 246, 0.85)'
+      });
+    });
+
+    // активный Range-профиль (зелёный)
     if (rangeProfileEnabled && selectionBox && rangeProfile) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(22, 163, 74, 0.10)';
+      ctx.fillRect(
+        selectionBox.x0,
+        selectionBox.y0,
+        selectionBox.x1 - selectionBox.x0,
+        selectionBox.y1 - selectionBox.y0
+      );
+      ctx.restore();
+
       renderRangeProfileInBox(ctx, rangeProfile, geometry, selectionBox, {
-        profileColor: profileColor || '#e6b73288'
+        profileColor: profileColor || '#16a34a'
       });
     }
 
     // шкалы
-    drawScales(ctx, geometry, priceStats);
+    drawScales(ctx, geometry, priceStats, visibleWindow.visibleCandles);
 
     // кроссхэйр
     let hoveredCandle = null;
@@ -270,13 +399,15 @@ function CandlesChart({
     profilePocColor,
     profileVaOpacity,
     profileVisible,
+    profileWidth,
+    profileShowPoc,
     crosshair,
     candles,
-    rangeProfileEnabled
+    rangeProfileEnabled,
+    fixedProfiles
   ]);
 
-  // мышь
-
+  // зум колесом
   function handleWheel(e) {
     e.preventDefault();
     if (!geometry) return;
@@ -286,12 +417,12 @@ function CandlesChart({
     setBarsPerScreen(nextBars);
   }
 
+  // нажатие кнопки мыши
   function handleMouseDown(e) {
     if (!geometry) return;
     const x = e.nativeEvent.offsetX;
     const y = e.nativeEvent.offsetY;
 
-    // средняя кнопка — кроссхэйр
     if (e.button === 1) {
       setCrosshair({ visible: true, x, y });
       dragRef.current = {
@@ -303,7 +434,6 @@ function CandlesChart({
       return;
     }
 
-    // правая — панорамирование
     if (e.button === 2) {
       dragRef.current = {
         type: 'pan',
@@ -314,7 +444,6 @@ function CandlesChart({
       return;
     }
 
-    // левая — выделение
     if (e.button === 0) {
       const startIndex = pickGlobalIndexFromX(
         x,
@@ -329,14 +458,21 @@ function CandlesChart({
         startOffset: rightOffset,
         startIndex
       };
+      return;
     }
   }
 
+  // движение мыши
   function handleMouseMove(e) {
     if (!geometry) return;
     const x = e.nativeEvent.offsetX;
     const y = e.nativeEvent.offsetY;
+
     const drag = dragRef.current;
+    if (!drag.type) {
+      setCrosshair({ visible: true, x, y });
+      return;
+    }
 
     if (drag.type === 'pan') {
       const deltaX = x - drag.startX;
@@ -352,14 +488,18 @@ function CandlesChart({
       return;
     }
 
-    if (drag.type === 'select' && drag.startIndex !== null) {
-      const idx = pickGlobalIndexFromX(
+    if (drag.type === 'select') {
+      const currentIndex = pickGlobalIndexFromX(
         x,
         geometry,
         visibleWindow.startIndex,
         visibleWindow.total
       );
-      setSelectionRange({ start: drag.startIndex, end: idx });
+      setSelectionRange({
+        start: drag.startIndex,
+        end: currentIndex
+      });
+      setCrosshair({ visible: true, x, y });
       return;
     }
 
@@ -369,6 +509,7 @@ function CandlesChart({
     }
   }
 
+  // отпускание кнопки
   function handleMouseUp() {
     if (dragRef.current.type === 'cross') {
       setCrosshair((prev) => ({ ...prev, visible: false }));
@@ -381,6 +522,7 @@ function CandlesChart({
     };
   }
 
+  // уход мыши с холста
   function handleLeave() {
     if (dragRef.current.type === 'cross') {
       setCrosshair((prev) => ({ ...prev, visible: false }));
@@ -393,10 +535,6 @@ function CandlesChart({
     };
   }
 
-  function handleContextMenu(e) {
-    e.preventDefault();
-  }
-
   return (
     <div
       ref={wrapperRef}
@@ -404,18 +542,18 @@ function CandlesChart({
         width: '100%',
         height: '100%',
         position: 'relative',
-        background: '#111317'
+        backgroundColor: '#020617'
       }}
     >
       <canvas
         ref={canvasRef}
-        style={{ width: '100%', height: '100%', cursor: 'default' }}
+        style={{ width: '100%', height: '100%', display: 'block' }}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleLeave}
-        onContextMenu={handleContextMenu}
+        onContextMenu={(e) => e.preventDefault()}
       />
     </div>
   );
@@ -425,27 +563,25 @@ function CandlesChart({
 function drawGrid(ctx, geometry, priceStats, visibleCandles) {
   const { layout, converters } = geometry;
   const {
+    priceScaleX,
     priceTop,
     priceBottom,
-    chartRight,
     paddingLeft,
-    priceScaleX
+    chartRight
   } = layout;
 
-  ctx.strokeStyle = '#1f242e';
-  ctx.lineWidth = 1;
+  ctx.save();
 
-  const lines = 6;
-  for (let i = 0; i <= lines; i++) {
-    const t = i / lines;
-    const price =
-      priceStats.minPrice + t * (priceStats.maxPrice - priceStats.minPrice);
-    const y = converters.priceToY(price);
-    ctx.beginPath();
-    ctx.moveTo(paddingLeft, y);
-    ctx.lineTo(priceScaleX, y);
-    ctx.stroke();
-  }
+  ctx.fillStyle = '#111317';
+  ctx.fillRect(
+    paddingLeft,
+    priceTop,
+    chartRight - paddingLeft,
+    priceBottom - priceTop
+  );
+
+  ctx.strokeStyle = '#1f2933';
+  ctx.lineWidth = 1;
 
   const bars = visibleCandles.length;
   const step = Math.max(1, Math.floor(bars / 8));
@@ -457,59 +593,27 @@ function drawGrid(ctx, geometry, priceStats, visibleCandles) {
     ctx.stroke();
   }
 
-  // граница между графиком и шкалой
   ctx.beginPath();
   ctx.moveTo(priceScaleX + 0.5, priceTop);
   ctx.lineTo(priceScaleX + 0.5, priceBottom);
   ctx.stroke();
 
-  // правая рамка (до края канваса / списка инструментов)
-  ctx.beginPath();
-  ctx.moveTo(chartRight + 0.5, priceTop);
-  ctx.lineTo(chartRight + 0.5, priceBottom);
-  ctx.stroke();
+  ctx.restore();
 }
 
 // шкалы
-function drawScales(ctx, geometry, priceStats) {
-  const { layout, converters } = geometry;
-  const {
-    priceScaleX,
-    priceTop,
-    priceBottom,
-    paddingLeft,
-    chartRight
-  } = layout;
+function drawScales(ctx, geometry, priceStats, visibleCandles) {
+  const { layout } = geometry;
+  const { priceScaleX, priceTop, priceBottom, chartRight } = layout;
 
   ctx.save();
-  ctx.fillStyle = '#111317';
+  ctx.fillStyle = '#020617';
   ctx.fillRect(
     priceScaleX,
     priceTop,
     chartRight - priceScaleX,
     priceBottom - priceTop
   );
-
-  ctx.fillStyle = '#d7dee9';
-  ctx.font = '12px system-ui';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-
-  const lines = 6;
-  for (let i = 0; i <= lines; i++) {
-    const t = i / lines;
-    const price =
-      priceStats.minPrice + t * (priceStats.maxPrice - priceStats.minPrice);
-    const y = converters.priceToY(price);
-    const text = price.toFixed(2);
-    ctx.fillText(text, priceScaleX + 4, y);
-  }
-
-  ctx.restore();
-
-  ctx.save();
-  ctx.fillStyle = '#111317';
-  ctx.fillRect(paddingLeft, priceBottom, chartRight - paddingLeft, 20);
   ctx.restore();
 }
 
