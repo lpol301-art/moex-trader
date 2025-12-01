@@ -1,6 +1,7 @@
 // server/src/services/moexService.js
 
 const axios = require('axios');
+const { readCache, writeCache } = require('../cache/jsonCache');
 
 /**
  * Разрешённые таймфреймы и их соответствие интервалам MOEX ISS.
@@ -29,6 +30,7 @@ const MOEX_MAX_LIMIT = 5000;
  * Памятка: кеш в памяти процесса
  */
 const CACHE_TTL_MS = 60 * 1000; // 60 секунд
+const FILE_CACHE_TTL_MS = 5 * 60 * 1000; // 5 минут
 const cache = new Map();
 
 /**
@@ -84,13 +86,26 @@ async function fetchCandlesFromMoex(symbol, timeframe, options = {}) {
   if (limit > MAX_CANDLES) limit = MAX_CANDLES;
 
   const from = options.from || getDefaultFromDate();
+  const cacheKey = buildCacheKey(symbol, timeframe, from, limit);
+  const cacheParams = {
+    symbol,
+    timeframe,
+    from: from || 'auto',
+    limit
+  };
 
   // пробуем взять из кеша
-  const cacheKey = buildCacheKey(symbol, timeframe, from, limit);
   const now = Date.now();
   const cached = cache.get(cacheKey);
   if (cached && cached.expiresAt > now) {
     return cached.data;
+  }
+
+  // Диск: читаем, если есть свежий кэш
+  const diskCached = await readCache(cacheParams, FILE_CACHE_TTL_MS);
+  if (diskCached && Array.isArray(diskCached.candles)) {
+    cache.set(cacheKey, { data: diskCached.candles, expiresAt: now + CACHE_TTL_MS });
+    return diskCached.candles;
   }
 
   // запрос к MOEX ISS
@@ -201,6 +216,9 @@ async function fetchCandlesFromMoex(symbol, timeframe, options = {}) {
     data: sliced,
     expiresAt: now + CACHE_TTL_MS
   });
+
+  // Пишем на диск для последующего использования между процессами/перезапусками
+  await writeCache(cacheParams, sliced);
 
   return sliced;
 }

@@ -23,6 +23,31 @@ import {
   pickGlobalIndexFromX
 } from '../chart/interactions';
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+const SESSION_GAP_MS = 2 * 60 * 60 * 1000; // считаем новую сессию, если пауза > 2ч
+const AUTO_PROFILE_STYLES = {
+  day: {
+    fill: 'rgba(236, 72, 153, 0.08)',
+    profile: 'rgba(236, 72, 153, 0.9)'
+  },
+  week: {
+    fill: 'rgba(245, 158, 11, 0.08)',
+    profile: 'rgba(245, 158, 11, 0.9)'
+  },
+  session: {
+    fill: 'rgba(34, 197, 94, 0.08)',
+    profile: 'rgba(34, 197, 94, 0.9)'
+  }
+};
+
+function estimateRangeBins(candlesCount, priceAreaHeight) {
+  const base = Math.max(12, Math.min(120, Math.floor((candlesCount || 1) / 2)));
+  if (!Number.isFinite(priceAreaHeight) || priceAreaHeight <= 0) return base;
+
+  const byHeight = Math.max(10, Math.min(120, Math.floor(priceAreaHeight / 8)));
+  return Math.round((base + byHeight) / 2);
+}
+
 function CandlesChart({
   candles,
   profileStepMode,
@@ -33,7 +58,10 @@ function CandlesChart({
   profileWidth,
   profileShowPoc,
   rangeProfileEnabled,
-  rangePinRequestId
+  rangePinRequestId,
+  autoDayProfile,
+  autoWeekProfile,
+  autoSessionProfile
 }) {
   const wrapperRef = useRef(null);
   const canvasRef = useRef(null);
@@ -48,6 +76,14 @@ function CandlesChart({
   const [fixedRanges, setFixedRanges] = useState([]);
 
   const [crosshair, setCrosshair] = useState({ visible: false, x: 0, y: 0 });
+
+  const candleTimes = useMemo(() => {
+    if (!candles || !candles.length) return [];
+    return candles.map((c) => {
+      const ts = new Date(c.time).getTime();
+      return Number.isFinite(ts) ? ts : null;
+    });
+  }, [candles]);
 
   const dragRef = useRef({
     type: null,
@@ -155,18 +191,147 @@ function CandlesChart({
   // профиль текущего диапазона
   const rangeProfile = useMemo(() => {
     if (!geometry || !rangeCandles.length || !rangeProfileEnabled) return null;
+
+    const bins = estimateRangeBins(
+      rangeCandles.length,
+      geometry.layout.priceBottom - geometry.layout.priceTop
+    );
     return computeRangeProfile(
       rangeCandles,
-      priceStats.minPrice,
-      priceStats.maxPrice,
-      24
+      null,
+      null,
+      bins
     );
   }, [
     geometry,
     rangeCandles,
-    priceStats.minPrice,
-    priceStats.maxPrice,
     rangeProfileEnabled
+  ]);
+
+  // Авто-профили: день / неделя / сессия (строятся от последней свечи)
+  const autoProfiles = useMemo(() => {
+    if (!geometry || !candles || !candles.length) return [];
+    if (!candleTimes.length || !Number.isFinite(candleTimes[candleTimes.length - 1]))
+      return [];
+
+    const { converters, layout } = geometry;
+    const lastTs = candleTimes[candleTimes.length - 1];
+    const lastDayStart = Math.floor(lastTs / DAY_MS) * DAY_MS;
+
+    const ranges = [];
+
+    if (autoDayProfile) {
+      ranges.push({
+        type: 'day',
+        startTs: lastDayStart,
+        endTs: lastDayStart + DAY_MS
+      });
+    }
+
+    if (autoWeekProfile) {
+      ranges.push({
+        type: 'week',
+        startTs: lastDayStart - DAY_MS * 6,
+        endTs: lastDayStart + DAY_MS
+      });
+    }
+
+    if (autoSessionProfile) {
+      let startIndex = candles.length - 1;
+      for (let i = candleTimes.length - 2; i >= 0; i -= 1) {
+        const ts = candleTimes[i];
+        const next = candleTimes[i + 1];
+        if (!Number.isFinite(ts) || !Number.isFinite(next)) break;
+        if (next - ts > SESSION_GAP_MS) {
+          startIndex = i + 1;
+          break;
+        }
+        startIndex = i;
+      }
+      ranges.push({ type: 'session', startIndex, endIndex: candles.length - 1 });
+    }
+
+    const priceAreaHeight = layout.priceBottom - layout.priceTop;
+
+    function resolveIndexRange(range) {
+      if ('startIndex' in range && 'endIndex' in range) {
+        return {
+          start: Math.max(0, range.startIndex),
+          end: Math.min(candles.length - 1, range.endIndex)
+        };
+      }
+
+      if ('startTs' in range && 'endTs' in range) {
+        let start = null;
+        let end = null;
+        candleTimes.forEach((ts, idx) => {
+          if (!Number.isFinite(ts)) return;
+          if (ts >= range.startTs && ts < range.endTs) {
+            if (start === null) start = idx;
+            end = idx;
+          }
+        });
+        if (start === null || end === null) return null;
+        return { start, end };
+      }
+
+      return null;
+    }
+
+    function buildProfile(range, type) {
+      const indexes = resolveIndexRange(range);
+      if (!indexes) return null;
+
+      const startGlobal = Math.max(0, Math.min(indexes.start, indexes.end));
+      const endGlobal = Math.min(candles.length - 1, Math.max(indexes.start, indexes.end));
+      if (startGlobal >= endGlobal) return null;
+
+      // полностью вне экрана
+      if (
+        endGlobal < visibleWindow.startIndex ||
+        startGlobal > visibleWindow.endIndex
+      ) {
+        return null;
+      }
+
+      const startLocal = Math.max(startGlobal - visibleWindow.startIndex, 0);
+      const endLocal = Math.min(
+        endGlobal - visibleWindow.startIndex,
+        visibleWindow.bars - 1
+      );
+
+      const x0 = converters.indexToX(startLocal) - layout.candleWidth / 2;
+      const x1 = converters.indexToX(endLocal) + layout.candleWidth / 2;
+
+      const slice = candles.slice(startGlobal, endGlobal + 1);
+      const bins = estimateRangeBins(slice.length, priceAreaHeight);
+      const profile = computeRangeProfile(slice, null, null, bins);
+      if (!profile) return null;
+
+      return {
+        id: `auto-${type}`,
+        type,
+        box: {
+          x0,
+          x1,
+          y0: layout.priceTop,
+          y1: layout.priceBottom
+        },
+        profile
+      };
+    }
+
+    return ranges
+      .map((r) => buildProfile(r, r.type))
+      .filter(Boolean);
+  }, [
+    geometry,
+    candles,
+    candleTimes,
+    visibleWindow,
+    autoDayProfile,
+    autoWeekProfile,
+    autoSessionProfile
   ]);
 
   // прямоугольник текущего выделения в координатах canvas (x0/x1/y0/y1!)
@@ -271,11 +436,16 @@ function CandlesChart({
         const sliceEnd = Math.min(candles.length, endGlobal + 1);
         const candlesSlice = candles.slice(sliceStart, sliceEnd);
 
+        const bins = estimateRangeBins(
+          candlesSlice.length,
+          layout.priceBottom - layout.priceTop
+        );
+
         const profile = computeRangeProfile(
           candlesSlice,
-          priceStats.minPrice,
-          priceStats.maxPrice,
-          24
+          null,
+          null,
+          bins
         );
         if (!profile) return null;
 
@@ -286,8 +456,6 @@ function CandlesChart({
     geometry,
     candles,
     fixedRanges,
-    priceStats.minPrice,
-    priceStats.maxPrice,
     visibleWindow
   ]);
 
@@ -333,6 +501,23 @@ function CandlesChart({
         showPoc: profileShowPoc
       });
     }
+
+    // авто-профили (день / неделя / сессия)
+    autoProfiles.forEach(({ box, profile, type }) => {
+      const colors = AUTO_PROFILE_STYLES[type] || {
+        fill: 'rgba(255, 255, 255, 0.06)',
+        profile: 'rgba(255, 255, 255, 0.9)'
+      };
+
+      ctx.save();
+      ctx.fillStyle = colors.fill;
+      ctx.fillRect(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0);
+      ctx.restore();
+
+      renderRangeProfileInBox(ctx, profile, geometry, box, {
+        profileColor: colors.profile
+      });
+    });
 
     // закреплённые Range-профили (синие)
     fixedProfiles.forEach(({ box, profile }) => {
@@ -404,7 +589,8 @@ function CandlesChart({
     crosshair,
     candles,
     rangeProfileEnabled,
-    fixedProfiles
+    fixedProfiles,
+    autoProfiles
   ]);
 
   // зум колесом

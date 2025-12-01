@@ -43,10 +43,17 @@ export function computeRangeProfile(
     bins[index].volume += vol;
   }
 
-  return bins.map((b, i) => ({
+  const result = bins.map((b, i) => ({
     price: min + i * step,
     volume: b.volume
   }));
+
+  // добавляем мета-информацию, чтобы правильно позиционировать бары по цене
+  result.minPrice = min;
+  result.maxPrice = max;
+  result.priceStep = step;
+
+  return result;
 }
 
 // Рисуем профиль ВНУТРИ прямоугольника, прижатым к его правой границе
@@ -64,29 +71,53 @@ export function renderRangeProfileInBox(
 
   const { x0, x1, y0, y1 } = selectionBox;
   const width = x1 - x0;
-  const height = y1 - y0;
   if (!Number.isFinite(width) || width <= 0) return;
-  if (!Number.isFinite(height) || height <= 0) return;
 
+  const { priceToY } = geometry.converters || {};
   let maxVol = 0;
   for (const b of bins) if (b.volume > maxVol) maxVol = b.volume || 1;
 
-  const color = 'rgba(230, 183, 50, 0.85)'; // жёлто-оранжевый для диапазона
-  const barHeight = 6;
+  // Используем реальный ценовой шаг, чтобы привязать высоту полос к шкале
+  const minPrice = Number(rangeProfile.minPrice);
+  const explicitStep = Number(rangeProfile.priceStep);
+  const fallbackStep =
+    bins.length > 1 && Number.isFinite(bins[1].price - bins[0].price)
+      ? bins[1].price - bins[0].price
+      : null;
+  const priceStep = Number.isFinite(explicitStep)
+    ? explicitStep
+    : fallbackStep;
+
+  const color = options.profileColor || 'rgba(230, 183, 50, 0.85)';
 
   ctx.save();
 
   bins.forEach((b, idx) => {
-    const t = idx / bins.length;
-    const y = y0 + (1 - t) * height;
-    const barW = (b.volume / maxVol) * width;
+    const startPrice = Number.isFinite(minPrice)
+      ? minPrice + idx * (priceStep || 0)
+      : b.price;
+    const endPrice = Number.isFinite(startPrice) && Number.isFinite(priceStep)
+      ? startPrice + priceStep
+      : startPrice;
 
+    const yBottom = priceToY ? priceToY(startPrice) : y1;
+    const yTop = priceToY && Number.isFinite(endPrice) ? priceToY(endPrice) : y0;
+
+    const yCenter = Number.isFinite(yBottom) && Number.isFinite(yTop)
+      ? (yBottom + yTop) / 2
+      : y1 - ((y1 - y0) / bins.length) * (idx + 0.5);
+
+    const barHeightRaw = Math.abs(yTop - yBottom) || (y1 - y0) / bins.length;
+    const barHeight = Math.max(2, Math.min(10, barHeightRaw * 0.9));
+
+    const barW = (b.volume / maxVol) * width;
     const barWidthClamped = Math.max(0, Math.min(barW, width));
     const xEnd = x1;
     const xStart = xEnd - barWidthClamped;
 
+    const yDraw = Math.min(y1, Math.max(y0, yCenter));
     ctx.fillStyle = color;
-    ctx.fillRect(xStart, y - barHeight / 2, barWidthClamped, barHeight);
+    ctx.fillRect(xStart, yDraw - barHeight / 2, barWidthClamped, barHeight);
   });
 
   ctx.restore();
