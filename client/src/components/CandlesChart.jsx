@@ -23,6 +23,14 @@ import {
   pickGlobalIndexFromX
 } from '../chart/interactions';
 
+function estimateRangeBins(candlesCount, priceAreaHeight) {
+  const base = Math.max(12, Math.min(120, Math.floor((candlesCount || 1) / 2)));
+  if (!Number.isFinite(priceAreaHeight) || priceAreaHeight <= 0) return base;
+
+  const byHeight = Math.max(10, Math.min(120, Math.floor(priceAreaHeight / 8)));
+  return Math.round((base + byHeight) / 2);
+}
+
 function CandlesChart({
   candles,
   profileStepMode,
@@ -155,17 +163,20 @@ function CandlesChart({
   // профиль текущего диапазона
   const rangeProfile = useMemo(() => {
     if (!geometry || !rangeCandles.length || !rangeProfileEnabled) return null;
+
+    const bins = estimateRangeBins(
+      rangeCandles.length,
+      geometry.layout.priceBottom - geometry.layout.priceTop
+    );
     return computeRangeProfile(
       rangeCandles,
-      priceStats.minPrice,
-      priceStats.maxPrice,
-      24
+      null,
+      null,
+      bins
     );
   }, [
     geometry,
     rangeCandles,
-    priceStats.minPrice,
-    priceStats.maxPrice,
     rangeProfileEnabled
   ]);
 
@@ -271,11 +282,16 @@ function CandlesChart({
         const sliceEnd = Math.min(candles.length, endGlobal + 1);
         const candlesSlice = candles.slice(sliceStart, sliceEnd);
 
+        const bins = estimateRangeBins(
+          candlesSlice.length,
+          layout.priceBottom - layout.priceTop
+        );
+
         const profile = computeRangeProfile(
           candlesSlice,
-          priceStats.minPrice,
-          priceStats.maxPrice,
-          24
+          null,
+          null,
+          bins
         );
         if (!profile) return null;
 
@@ -286,8 +302,6 @@ function CandlesChart({
     geometry,
     candles,
     fixedRanges,
-    priceStats.minPrice,
-    priceStats.maxPrice,
     visibleWindow
   ]);
 

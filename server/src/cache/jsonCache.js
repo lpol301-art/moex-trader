@@ -16,10 +16,10 @@ function ensureCacheDir() {
 
 /**
  * Строим имя файла кэша по параметрам запроса.
- * Пример: SBER_1d_2024-01-01_2024-02-01.json
+ * Пример: SBER_1d_2024-01-01_limit-500.json
  */
-function buildCacheFileName({ symbol, timeframe, from, till }) {
-  const rawName = `${symbol}_${timeframe}_${from}_${till}.json`;
+function buildCacheFileName({ symbol, timeframe, from = 'auto', limit = 'max' }) {
+  const rawName = `${symbol}_${timeframe}_${from}_limit-${limit}.json`;
 
   // На всякий случай вычищаем странные символы
   const safeName = rawName.replace(/[^a-zA-Z0-9_.-]/g, '_');
@@ -30,7 +30,7 @@ function buildCacheFileName({ symbol, timeframe, from, till }) {
 /**
  * Читает кэш из файла, если он существует и не устарел.
  *
- * @param {Object} params - ключ кэша (symbol, timeframe, from, till)
+ * @param {Object} params - ключ кэша (symbol, timeframe, from, limit)
  * @param {number} ttlMs  - время жизни кэша в миллисекундах
  */
 async function readCache(params, ttlMs) {
@@ -72,7 +72,7 @@ async function readCache(params, ttlMs) {
 /**
  * Записывает данные свечей в кэш.
  *
- * @param {Object} params - ключ кэша (symbol, timeframe, from, till)
+ * @param {Object} params - ключ кэша (symbol, timeframe, from, limit)
  * @param {Array} candles - массив свечей
  */
 async function writeCache(params, candles) {
@@ -86,7 +86,7 @@ async function writeCache(params, candles) {
       symbol: params.symbol,
       timeframe: params.timeframe,
       from: params.from,
-      till: params.till
+      limit: params.limit
     },
     candles
   };

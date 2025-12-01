@@ -72,13 +72,13 @@ export function renderRangeProfileInBox(
   for (const b of bins) if (b.volume > maxVol) maxVol = b.volume || 1;
 
   const color = 'rgba(230, 183, 50, 0.85)'; // жёлто-оранжевый для диапазона
-  const barHeight = 6;
+  const rowHeight = height / bins.length;
+  const barHeight = Math.max(2, Math.min(6, rowHeight * 0.85));
 
   ctx.save();
 
   bins.forEach((b, idx) => {
-    const t = idx / bins.length;
-    const y = y0 + (1 - t) * height;
+    const y = y1 - rowHeight * (idx + 0.5);
     const barW = (b.volume / maxVol) * width;
 
     const barWidthClamped = Math.max(0, Math.min(barW, width));
