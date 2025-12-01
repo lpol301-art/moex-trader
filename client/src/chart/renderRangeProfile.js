@@ -94,23 +94,12 @@ export function computeRangeProfile(
     volume: b.volume
   }));
 
-  let maxVol = 0;
-  let pocIndex = 0;
-  resultBins.forEach((b, i) => {
-    if (b.volume > maxVol) {
-      maxVol = b.volume;
-      pocIndex = i;
-    }
-  });
+  // добавляем мета-информацию, чтобы правильно позиционировать бары по цене
+  result.minPrice = min;
+  result.maxPrice = max;
+  result.priceStep = step;
 
-  return {
-    bins: resultBins,
-    minPrice: min,
-    maxPrice: max,
-    priceStep: step,
-    maxVolume: maxVol || 1,
-    pocIndex
-  };
+  return result;
 }
 
 // Рисуем профиль ВНУТРИ прямоугольника, прижатым к его правой границе
@@ -141,22 +130,14 @@ export function renderRangeProfileInBox(
   const priceStep = Number(meta.priceStep) ||
     (bins.length > 1 && Number.isFinite(bins[1].price - bins[0].price)
       ? bins[1].price - bins[0].price
-      : null);
-  const minPrice = Number(meta.minPrice);
+      : null;
+  const priceStep = Number.isFinite(explicitStep)
+    ? explicitStep
+    : fallbackStep;
 
-  const innerLeft = x0 + 6;
-  const innerRight = x1 - 4;
-  const barAreaWidth = Math.max(4, innerRight - innerLeft);
+  const color = options.profileColor || 'rgba(230, 183, 50, 0.85)';
 
   ctx.save();
-  ctx.beginPath();
-  ctx.rect(x0, y0, width, height);
-  ctx.clip();
-
-  const baseColor = options.profileColor || 'rgba(230, 183, 50, 0.9)';
-  const gradient = ctx.createLinearGradient(innerLeft, y0, innerRight, y0);
-  gradient.addColorStop(0, `${baseColor.replace('0.9', '0.65')}`);
-  gradient.addColorStop(1, baseColor);
 
   bins.forEach((b, idx) => {
     const startPrice = Number.isFinite(minPrice)
@@ -172,40 +153,18 @@ export function renderRangeProfileInBox(
     const yTop = clamp(Math.min(yStart, yEnd), y0, y1);
     const yBottom = clamp(Math.max(yStart, yEnd), y0, y1);
 
-    const rawHeight = Math.max(2, yBottom - yTop);
-    const gap = Math.min(2, rawHeight * 0.15);
-    const barHeight = Math.max(2, rawHeight - gap);
-    const yCenter = (yTop + yBottom) / 2;
+    const barHeightRaw = Math.abs(yTop - yBottom) || (y1 - y0) / bins.length;
+    const barHeight = Math.max(2, Math.min(10, barHeightRaw * 0.9));
 
-    const widthShare = b.volume / (maxVol || 1);
-    const barW = Math.max(0, barAreaWidth * widthShare);
-    const xEnd = innerRight;
-    const xStart = Math.max(innerLeft, xEnd - barW);
+    const barW = (b.volume / maxVol) * width;
+    const barWidthClamped = Math.max(0, Math.min(barW, width));
+    const xEnd = x1;
+    const xStart = xEnd - barWidthClamped;
 
-    ctx.fillStyle = gradient;
-    ctx.fillRect(xStart, yCenter - barHeight / 2, barW, barHeight);
+    const yDraw = Math.min(y1, Math.max(y0, yCenter));
+    ctx.fillStyle = color;
+    ctx.fillRect(xStart, yDraw - barHeight / 2, barWidthClamped, barHeight);
   });
-
-  // тонкая полоска POC по центру самого объёмного бина
-  if (Number.isFinite(meta.pocIndex) && bins[meta.pocIndex]) {
-    const pocPrice = Number.isFinite(minPrice) && Number.isFinite(priceStep)
-      ? minPrice + meta.pocIndex * priceStep
-      : bins[meta.pocIndex].price;
-    const pocNextPrice = Number.isFinite(pocPrice) && Number.isFinite(priceStep)
-      ? pocPrice + priceStep
-      : pocPrice;
-
-    const yStart = priceToY ? priceToY(pocPrice) : y1;
-    const yEnd = priceToY && Number.isFinite(pocNextPrice)
-      ? priceToY(pocNextPrice)
-      : y0;
-
-    const yTop = clamp(Math.min(yStart, yEnd), y0, y1);
-    const yBottom = clamp(Math.max(yStart, yEnd), y0, y1);
-
-    ctx.fillStyle = options.pocColor || 'rgba(255, 255, 255, 0.85)';
-    ctx.fillRect(innerRight - 1, yTop, 2, Math.max(2, yBottom - yTop));
-  }
 
   ctx.restore();
 }

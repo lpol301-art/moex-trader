@@ -28,26 +28,24 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const SESSION_GAP_MS = 2 * 60 * 60 * 1000; // считаем новую сессию, если пауза > 2ч
 const AUTO_PROFILE_STYLES = {
   day: {
-    fill: 'rgba(37, 99, 235, 0.18)',
-    profile: 'rgba(37, 99, 235, 0.85)'
+    fill: 'rgba(236, 72, 153, 0.08)',
+    profile: 'rgba(236, 72, 153, 0.9)'
   },
   week: {
-    fill: 'rgba(124, 58, 237, 0.18)',
-    profile: 'rgba(124, 58, 237, 0.85)'
+    fill: 'rgba(245, 158, 11, 0.08)',
+    profile: 'rgba(245, 158, 11, 0.9)'
   },
   session: {
-    fill: 'rgba(16, 185, 129, 0.18)',
-    profile: 'rgba(16, 185, 129, 0.85)'
-  },
-  month: {
-    fill: 'rgba(245, 158, 11, 0.18)',
-    profile: 'rgba(245, 158, 11, 0.82)'
-  },
-  visible: {
-    fill: 'rgba(59, 130, 246, 0.18)',
-    profile: 'rgba(59, 130, 246, 0.82)'
+    fill: 'rgba(34, 197, 94, 0.08)',
+    profile: 'rgba(34, 197, 94, 0.9)'
   }
 };
+
+function strengthen(color, alpha) {
+  const match = color.match(/rgba\(([^)]+),\s*([0-9.]+)\)/);
+  if (!match) return color;
+  return `rgba(${match[1]}, ${alpha})`;
+}
 
 function estimateRangeBins(candlesCount, priceAreaHeight) {
   const base = Math.max(16, Math.min(60, Math.floor((candlesCount || 1) / 3)));
@@ -68,8 +66,6 @@ function CandlesChart({
   profileVaOpacity,
   profileWidth,
   profileShowPoc,
-  rangeProfileEnabled,
-  rangePinRequestId,
   autoDayProfile,
   autoWeekProfile,
   autoSessionProfile,
@@ -83,12 +79,24 @@ function CandlesChart({
   const [barsPerScreen, setBarsPerScreen] = useState(140);
   const [rightOffset, setRightOffset] = useState(0);
 
-  // текущее живое выделение
-  const [selectionRange, setSelectionRange] = useState(null);
-  // закреплённые диапазоны (по индексам свечей)
-  const [fixedRanges, setFixedRanges] = useState([]);
-
   const [crosshair, setCrosshair] = useState({ visible: false, x: 0, y: 0 });
+
+  const autoProfileFlags = useMemo(
+    () => ({
+      day: autoDayProfile,
+      week: autoWeekProfile,
+      session: autoSessionProfile,
+      month: autoMonthProfile,
+      visible: autoVisibleProfile
+    }),
+    [
+      autoDayProfile,
+      autoWeekProfile,
+      autoSessionProfile,
+      autoMonthProfile,
+      autoVisibleProfile
+    ]
+  );
 
   const candleTimes = useMemo(() => {
     if (!candles || !candles.length) return [];
@@ -101,8 +109,7 @@ function CandlesChart({
   const dragRef = useRef({
     type: null,
     startX: 0,
-    startOffset: 0,
-    startIndex: null
+    startOffset: 0
   });
 
   // размер контейнера
@@ -188,37 +195,6 @@ function CandlesChart({
     priceStats.minPrice,
     priceStats.maxPrice,
     profileStepMode
-  ]);
-
-  // свечи в текущем диапазоне
-  const rangeCandles = useMemo(() => {
-    if (!selectionRange || !candles || !candles.length) return [];
-    const start = Math.max(0, Math.min(selectionRange.start, selectionRange.end));
-    const end = Math.min(
-      candles.length,
-      Math.max(selectionRange.start, selectionRange.end) + 1
-    );
-    return candles.slice(start, end);
-  }, [selectionRange, candles]);
-
-  // профиль текущего диапазона
-  const rangeProfile = useMemo(() => {
-    if (!geometry || !rangeCandles.length || !rangeProfileEnabled) return null;
-
-    const bins = estimateRangeBins(
-      rangeCandles.length,
-      geometry.layout.priceBottom - geometry.layout.priceTop
-    );
-    return computeRangeProfile(
-      rangeCandles,
-      null,
-      null,
-      bins
-    );
-  }, [
-    geometry,
-    rangeCandles,
-    rangeProfileEnabled
   ]);
 
   // Авто-профили: день / неделя / сессия (строятся от последней свечи)
@@ -382,9 +358,7 @@ function CandlesChart({
     visibleWindow,
     autoDayProfile,
     autoWeekProfile,
-    autoSessionProfile,
-    autoMonthProfile,
-    autoVisibleProfile
+    autoSessionProfile
   ]);
 
   // прямоугольник текущего выделения в координатах canvas (x0/x1/y0/y1!)
@@ -561,24 +535,6 @@ function CandlesChart({
     // сетка
     drawGrid(ctx, geometry, priceStats, visibleWindow.visibleCandles);
 
-    // авто-профили (день / неделя / сессия / месяц / видимый диапазон)
-    autoProfiles.forEach(({ box, profile, type }) => {
-      const colors = AUTO_PROFILE_STYLES[type] || {
-        fill: 'rgba(255, 255, 255, 0.06)',
-        profile: 'rgba(255, 255, 255, 0.8)'
-      };
-
-      ctx.save();
-      ctx.fillStyle = colors.fill;
-      ctx.fillRect(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0);
-      ctx.restore();
-
-      renderRangeProfileInBox(ctx, profile, geometry, box, {
-        profileColor: colors.profile,
-        pocColor: 'rgba(255, 255, 255, 0.9)'
-      });
-    });
-
     // свечи + объёмы
     renderCandles(
       ctx,
@@ -600,6 +556,23 @@ function CandlesChart({
       });
     }
 
+    // авто-профили (день / неделя / сессия)
+    autoProfiles.forEach(({ box, profile, type }) => {
+      const colors = AUTO_PROFILE_STYLES[type] || {
+        fill: 'rgba(255, 255, 255, 0.06)',
+        profile: 'rgba(255, 255, 255, 0.9)'
+      };
+
+      ctx.save();
+      ctx.fillStyle = colors.fill;
+      ctx.fillRect(box.x0, box.y0, box.x1 - box.x0, box.y1 - box.y0);
+      ctx.restore();
+
+      renderRangeProfileInBox(ctx, profile, geometry, box, {
+        profileColor: colors.profile
+      });
+    });
+
     // закреплённые Range-профили (синие)
     fixedProfiles.forEach(({ box, profile }) => {
       ctx.save();
@@ -608,8 +581,7 @@ function CandlesChart({
       ctx.restore();
 
       renderRangeProfileInBox(ctx, profile, geometry, box, {
-        profileColor: 'rgba(59, 130, 246, 0.88)',
-        pocColor: 'rgba(255, 255, 255, 0.9)'
+        profileColor: 'rgba(59, 130, 246, 0.85)'
       });
     });
 
@@ -626,8 +598,7 @@ function CandlesChart({
       ctx.restore();
 
       renderRangeProfileInBox(ctx, rangeProfile, geometry, selectionBox, {
-        profileColor: profileColor || 'rgba(34, 197, 94, 0.92)',
-        pocColor: 'rgba(249, 250, 255, 0.95)'
+        profileColor: profileColor || '#16a34a'
       });
     }
 
@@ -661,8 +632,6 @@ function CandlesChart({
     priceStats,
     visibleWindow,
     mainProfile,
-    selectionBox,
-    rangeProfile,
     profileColor,
     profilePocColor,
     profileVaOpacity,
@@ -671,9 +640,8 @@ function CandlesChart({
     profileShowPoc,
     crosshair,
     candles,
-    rangeProfileEnabled,
-    fixedProfiles,
-    autoProfiles
+    autoProfiles,
+    autoProfileFlags
   ]);
 
   // зум колесом
@@ -697,8 +665,7 @@ function CandlesChart({
       dragRef.current = {
         type: 'cross',
         startX: x,
-        startOffset: rightOffset,
-        startIndex: null
+        startOffset: rightOffset
       };
       return;
     }
@@ -707,25 +674,17 @@ function CandlesChart({
       dragRef.current = {
         type: 'pan',
         startX: x,
-        startOffset: rightOffset,
-        startIndex: null
+        startOffset: rightOffset
       };
       return;
     }
 
     if (e.button === 0) {
-      const startIndex = pickGlobalIndexFromX(
-        x,
-        geometry,
-        visibleWindow.startIndex,
-        visibleWindow.total
-      );
-      setSelectionRange({ start: startIndex, end: startIndex });
+      setCrosshair({ visible: true, x, y });
       dragRef.current = {
-        type: 'select',
+        type: 'cross',
         startX: x,
-        startOffset: rightOffset,
-        startIndex
+        startOffset: rightOffset
       };
       return;
     }
@@ -757,21 +716,6 @@ function CandlesChart({
       return;
     }
 
-    if (drag.type === 'select') {
-      const currentIndex = pickGlobalIndexFromX(
-        x,
-        geometry,
-        visibleWindow.startIndex,
-        visibleWindow.total
-      );
-      setSelectionRange({
-        start: drag.startIndex,
-        end: currentIndex
-      });
-      setCrosshair({ visible: true, x, y });
-      return;
-    }
-
     if (drag.type === 'cross') {
       setCrosshair({ visible: true, x, y });
       return;
@@ -786,8 +730,7 @@ function CandlesChart({
     dragRef.current = {
       type: null,
       startX: 0,
-      startOffset: 0,
-      startIndex: null
+      startOffset: 0
     };
   }
 
@@ -799,8 +742,7 @@ function CandlesChart({
     dragRef.current = {
       type: null,
       startX: 0,
-      startOffset: 0,
-      startIndex: null
+      startOffset: 0
     };
   }
 

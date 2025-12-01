@@ -94,11 +94,6 @@ function App() {
   const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
   const api = axios.create({ baseURL: API_BASE_URL });
 
-  // Range-профиль (по выделенному диапазону)
-  const [rangeProfileEnabled, setRangeProfileEnabled] = useState(true);
-  // Сигнал «закрепить текущий Range-профиль»
-  const [rangePinRequestId, setRangePinRequestId] = useState(0);
-
   // Авто-профили (день / неделя / сессия)
   const [autoDayProfile, setAutoDayProfile] = useState(true);
   const [autoWeekProfile, setAutoWeekProfile] = useState(false);
@@ -350,49 +345,6 @@ function App() {
           <div
             style={{
               display: 'flex',
-              gap: 10,
-              flexWrap: 'wrap',
-              alignItems: 'center'
-            }}
-          >
-            <label
-              style={{
-                fontSize: '13px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={rangeProfileEnabled}
-                onChange={(e) => setRangeProfileEnabled(e.target.checked)}
-              />
-              Range профиль
-            </label>
-
-            <button
-              onClick={() =>
-                setRangePinRequestId((prev) => prev + 1)
-              }
-              disabled={!rangeProfileEnabled}
-              style={{
-                fontSize: '13px',
-                padding: '4px 10px',
-                borderRadius: 5,
-                border: '1px solid #4b5563',
-                backgroundColor: rangeProfileEnabled ? '#1f2937' : '#111827',
-                color: '#e5e9f0',
-                cursor: rangeProfileEnabled ? 'pointer' : 'default'
-              }}
-            >
-              Закрепить выделение
-            </button>
-          </div>
-
-          <div
-            style={{
-              display: 'flex',
               alignItems: 'center',
               gap: 12,
               flexWrap: 'wrap'
@@ -516,8 +468,6 @@ function App() {
                 profileVaOpacity={profileVaOpacity}
                 profileWidth={profileWidth}
                 profileShowPoc={profileShowPoc}
-                rangeProfileEnabled={rangeProfileEnabled}
-                rangePinRequestId={rangePinRequestId}
                 autoDayProfile={autoDayProfile}
                 autoWeekProfile={autoWeekProfile}
                 autoSessionProfile={autoSessionProfile}
