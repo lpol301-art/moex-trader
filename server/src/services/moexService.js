@@ -2,166 +2,211 @@
 
 const axios = require('axios');
 
-// Сколько максимум просим у MOEX за один запрос
-const MOEX_LIMIT = 5000;
+/**
+ * Разрешённые таймфреймы и их соответствие интервалам MOEX ISS.
+ * 10  = 10 минут
+ * 60  = 1 час
+ * 24  = 1 день
+ */
+const ALLOWED_TIMEFRAMES = {
+  '10m': 10,
+  '1h': 60,
+  '1d': 24
+};
 
-// Сколько максимум отдаём на фронт (чтобы не улететь в космос)
+/**
+ * Максимум свечей, которые мы вернём клиенту.
+ * (Чтобы не убить браузер огромным количеством данных.)
+ */
 const MAX_CANDLES = 2000;
 
-// Простейший in-memory кэш: ключ = symbol|tf, TTL ~ 60 секунд
+/**
+ * Лимит, который можно просить у MOEX за один запрос.
+ */
+const MOEX_MAX_LIMIT = 5000;
+
+/**
+ * Памятка: кеш в памяти процесса
+ */
+const CACHE_TTL_MS = 60 * 1000; // 60 секунд
 const cache = new Map();
-const CACHE_TTL_MS = 60 * 1000;
 
-function mapTimeframeToInterval(tf) {
-  // Значения interval по спецификации MOEX ISS для /candles
-  // 1  - 1 минута
-  // 10 - 10 минут
-  // 60 - 1 час
-  // 24 - 1 день
-  switch (tf) {
-    case '1h':
-      return 60;
-    case '10m':
-      return 10;
-    case '1d':
-    default:
-      return 24;
-  }
-}
-
-function getFromDateParam() {
-  const now = new Date();
-  // Год назад от сегодняшней даты
-  const fromDate = new Date(
-    now.getFullYear() - 1,
-    now.getMonth(),
-    now.getDate()
-  );
-  return fromDate.toISOString().slice(0, 10); // YYYY-MM-DD
+/**
+ * Дата "по умолчанию" — 6 месяцев назад.
+ * Если клиент не указал from, берём её.
+ */
+function getDefaultFromDate() {
+  const d = new Date();
+  d.setMonth(d.getMonth() - 6);
+  return d.toISOString().slice(0, 10); // YYYY-MM-DD
 }
 
 /**
- * Тянем свечи с MOEX ISS.
- * Возвращаем объект:
- * {
- *   symbol, timeframe, from, till, candlesCount, candles: [...]
- * }
+ * Ключ кеша.
  */
-async function fetchCandlesFromMoex(symbol, timeframe) {
-  const cacheKey = `${symbol}|${timeframe}`;
-  const now = Date.now();
+function buildCacheKey(symbol, timeframe, from, limit) {
+  return `${symbol}|${timeframe}|${from || 'auto'}|${limit}`;
+}
 
-  // --- кэш ---
+/**
+ * Специальная ошибка для MOEX, чтобы контроллер мог отличить её
+ * от обычных серверных ошибок.
+ */
+function createMoexError(message, meta) {
+  const err = new Error(message);
+  err.source = 'moex';
+  if (meta) {
+    err.meta = meta;
+  }
+  return err;
+}
+
+/**
+ * Основная функция запроса свечей с MOEX ISS.
+ *
+ * @param {string} symbol     — тикер, например "SBER"
+ * @param {string} timeframe  — '10m' | '1h' | '1d'
+ * @param {object} options    — { limit?: number, from?: string }
+ * @returns {Promise<Array<{time, open, high, low, close, volume}>>}
+ */
+async function fetchCandlesFromMoex(symbol, timeframe, options = {}) {
+  const interval = ALLOWED_TIMEFRAMES[timeframe];
+  if (!interval) {
+    throw createMoexError(`Unsupported timeframe: ${timeframe}`, { timeframe });
+  }
+
+  const rawLimit = options.limit;
+  let limit = 500;
+  if (typeof rawLimit === 'number' && Number.isFinite(rawLimit)) {
+    limit = Math.floor(rawLimit);
+  }
+  if (limit < 1) limit = 1;
+  if (limit > MAX_CANDLES) limit = MAX_CANDLES;
+
+  const from = options.from || getDefaultFromDate();
+
+  // пробуем взять из кеша
+  const cacheKey = buildCacheKey(symbol, timeframe, from, limit);
+  const now = Date.now();
   const cached = cache.get(cacheKey);
   if (cached && cached.expiresAt > now) {
     return cached.data;
   }
 
-  const interval = mapTimeframeToInterval(timeframe);
-  const from = getFromDateParam();
-
-  // /candles.json работает и для 10m, и для 1h, и для 1d
+  // запрос к MOEX ISS
   const url = `https://iss.moex.com/iss/engines/stock/markets/shares/securities/${encodeURIComponent(
     symbol
-  )}/candles.json?interval=${interval}&from=${from}&limit=${MOEX_LIMIT}`;
+  )}/candles.json`;
 
-  console.log('[MOEX REQUEST]', url);
-
-  const response = await axios.get(url, {
-    headers: {
-      'User-Agent': 'moex-viewer-demo'
+  let response;
+  try {
+    response = await axios.get(url, {
+      params: {
+        interval,
+        from,
+        limit: Math.min(limit, MOEX_MAX_LIMIT)
+      },
+      timeout: 10000
+    });
+  } catch (err) {
+    // HTTP-ошибка
+    if (err.response) {
+      throw createMoexError(
+        `MOEX HTTP error: ${err.response.status}`,
+        { status: err.response.status }
+      );
     }
-  });
 
-  const data = response.data;
-  const candlesBlock = data.candles;
+    // таймаут
+    if (err.code === 'ECONNABORTED') {
+      throw createMoexError(
+        'Timeout while requesting MOEX ISS',
+        { code: err.code }
+      );
+    }
 
-  if (!candlesBlock || !candlesBlock.data || !candlesBlock.columns) {
-    throw new Error('Unexpected MOEX response format (no candles block)');
+    // любая другая сетевая ошибка
+    throw createMoexError(
+      'Network error while requesting MOEX ISS',
+      { code: err.code }
+    );
   }
 
-  const cols = candlesBlock.columns;
-  const idxBegin = cols.indexOf('begin'); // дата/время
-  const idxOpen = cols.indexOf('open');
-  const idxHigh = cols.indexOf('high');
-  const idxLow = cols.indexOf('low');
-  const idxClose = cols.indexOf('close');
-  const idxVolume = cols.indexOf('volume');
+  const payload = response && response.data;
+  if (!payload || !payload.candles || !Array.isArray(payload.candles.data)) {
+    throw createMoexError('Unexpected MOEX ISS response format');
+  }
+
+  const candlesBlock = payload.candles;
+  const columns = candlesBlock.columns || [];
+  const data = candlesBlock.data || [];
+
+  const idxBegin = columns.indexOf('begin');
+  const idxOpen = columns.indexOf('open');
+  const idxHigh = columns.indexOf('high');
+  const idxLow = columns.indexOf('low');
+  const idxClose = columns.indexOf('close');
+  const idxVolume = columns.indexOf('volume');
 
   if (
-    idxBegin < 0 ||
-    idxOpen < 0 ||
-    idxHigh < 0 ||
-    idxLow < 0 ||
-    idxClose < 0 ||
-    idxVolume < 0
+    idxBegin === -1 ||
+    idxOpen === -1 ||
+    idxHigh === -1 ||
+    idxLow === -1 ||
+    idxClose === -1 ||
+    idxVolume === -1
   ) {
-    throw new Error('MOEX candles: missing expected columns');
+    throw createMoexError(
+      'MOEX ISS candles: missing required columns',
+      { columns }
+    );
   }
 
-  let candles = candlesBlock.data
-    .map((row) => {
-      const begin = row[idxBegin]; // "YYYY-MM-DD HH:MM:SS"
-      const open = Number(row[idxOpen]);
-      const high = Number(row[idxHigh]);
-      const low = Number(row[idxLow]);
-      const close = Number(row[idxClose]);
-      const volume = Number(row[idxVolume]);
+  const candles = [];
 
-      if (
-        !isFinite(open) ||
-        !isFinite(high) ||
-        !isFinite(low) ||
-        !isFinite(close)
-      ) {
-        return null;
-      }
+  for (const row of data) {
+    const timeStr = row[idxBegin];
+    const open = Number(row[idxOpen]);
+    const high = Number(row[idxHigh]);
+    const low = Number(row[idxLow]);
+    const close = Number(row[idxClose]);
+    const volume = Number(row[idxVolume]);
 
-      return {
-        time: begin,
-        open,
-        high,
-        low,
-        close,
-        volume
-      };
-    })
-    .filter(Boolean);
+    if (
+      !timeStr ||
+      !Number.isFinite(open) ||
+      !Number.isFinite(high) ||
+      !Number.isFinite(low) ||
+      !Number.isFinite(close) ||
+      !Number.isFinite(volume)
+    ) {
+      continue;
+    }
 
-  // режем с хвоста, если перебор по количеству
-  if (candles.length > MAX_CANDLES) {
-    candles = candles.slice(-MAX_CANDLES);
+    candles.push({
+      time: timeStr,
+      open,
+      high,
+      low,
+      close,
+      volume
+    });
   }
 
-  if (candles.length === 0) {
-    throw new Error('MOEX returned empty candles');
-  }
+  // на всякий случай ещё раз обрежем по MAX_CANDLES
+  const sliced = candles.slice(-MAX_CANDLES);
 
-  const first = candles[0];
-  const last = candles[candles.length - 1];
-
-  const result = {
-    symbol,
-    timeframe,
-    from: first.time,
-    till: last.time,
-    candlesCount: candles.length,
-    candles
-  };
-
-  // кладём в кэш
+  // кладём в кеш
   cache.set(cacheKey, {
-    data: result,
+    data: sliced,
     expiresAt: now + CACHE_TTL_MS
   });
 
-  console.log(
-    `[MOEX] ${symbol} tf=${timeframe} from=${result.from} -> ${result.candlesCount} candles`
-  );
-
-  return result;
+  return sliced;
 }
 
 module.exports = {
-  fetchCandlesFromMoex
+  fetchCandlesFromMoex,
+  ALLOWED_TIMEFRAMES,
+  MAX_CANDLES
 };
