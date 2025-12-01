@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   buildGeometry,
+  clamp,
   computePriceStats,
   computeVisibleWindow
 } from '../chart/geometry';
@@ -286,22 +287,34 @@ function CandlesChart({
       const endGlobal = Math.min(candles.length - 1, Math.max(indexes.start, indexes.end));
       if (startGlobal >= endGlobal) return null;
 
+      const lastVisibleGlobal = visibleWindow.endIndex - 1;
+      if (lastVisibleGlobal < visibleWindow.startIndex) return null;
+
       // полностью вне экрана
       if (
         endGlobal < visibleWindow.startIndex ||
-        startGlobal > visibleWindow.endIndex
+        startGlobal > lastVisibleGlobal
       ) {
         return null;
       }
 
-      const startLocal = Math.max(startGlobal - visibleWindow.startIndex, 0);
-      const endLocal = Math.min(
+      const lastLocal = Math.max(visibleWindow.visibleCandles.length - 1, 0);
+      const startLocal = clamp(
+        startGlobal - visibleWindow.startIndex,
+        0,
+        lastLocal
+      );
+      const endLocal = clamp(
         endGlobal - visibleWindow.startIndex,
-        visibleWindow.bars - 1
+        0,
+        lastLocal
       );
 
-      const x0 = converters.indexToX(startLocal) - layout.candleWidth / 2;
-      const x1 = converters.indexToX(endLocal) + layout.candleWidth / 2;
+      const left = Math.min(startLocal, endLocal);
+      const right = Math.max(startLocal, endLocal);
+
+      const x0 = converters.indexToX(left) - layout.candleWidth / 2;
+      const x1 = converters.indexToX(right) + layout.candleWidth / 2;
 
       const slice = candles.slice(startGlobal, endGlobal + 1);
       const bins = estimateRangeBins(slice.length, priceAreaHeight);
@@ -346,21 +359,33 @@ function CandlesChart({
     );
     const endGlobal = Math.max(selectionRange.start, selectionRange.end);
 
+    const lastVisibleGlobal = visibleWindow.endIndex - 1;
+    if (lastVisibleGlobal < visibleWindow.startIndex) return null;
+
     if (
       endGlobal < visibleWindow.startIndex ||
-      startGlobal > visibleWindow.endIndex
+      startGlobal > lastVisibleGlobal
     ) {
       return null;
     }
 
-    const startLocal = Math.max(startGlobal - visibleWindow.startIndex, 0);
-    const endLocal = Math.min(
+    const lastLocal = Math.max(visibleWindow.visibleCandles.length - 1, 0);
+    const startLocal = clamp(
+      startGlobal - visibleWindow.startIndex,
+      0,
+      lastLocal
+    );
+    const endLocal = clamp(
       endGlobal - visibleWindow.startIndex,
-      visibleWindow.bars - 1
+      0,
+      lastLocal
     );
 
-    const x0 = converters.indexToX(startLocal) - geometry.layout.candleWidth / 2;
-    const x1 = converters.indexToX(endLocal) + geometry.layout.candleWidth / 2;
+    const left = Math.min(startLocal, endLocal);
+    const right = Math.max(startLocal, endLocal);
+
+    const x0 = converters.indexToX(left) - geometry.layout.candleWidth / 2;
+    const x1 = converters.indexToX(right) + geometry.layout.candleWidth / 2;
 
     return {
       x0,
@@ -401,6 +426,10 @@ function CandlesChart({
     if (!geometry || !candles || !candles.length || !fixedRanges.length) return [];
 
     const { converters, layout } = geometry;
+    const lastVisibleGlobal = visibleWindow.endIndex - 1;
+    if (lastVisibleGlobal < visibleWindow.startIndex) return [];
+
+    const lastLocal = Math.max(visibleWindow.visibleCandles.length - 1, 0);
 
     return fixedRanges
       .map((range) => {
@@ -414,19 +443,27 @@ function CandlesChart({
         // полностью вне экрана — не рисуем
         if (
           endGlobal < visibleWindow.startIndex ||
-          startGlobal > visibleWindow.endIndex
+          startGlobal > lastVisibleGlobal
         ) {
           return null;
         }
 
-        const startLocal = Math.max(startGlobal - visibleWindow.startIndex, 0);
-        const endLocal = Math.min(
+        const startLocal = clamp(
+          startGlobal - visibleWindow.startIndex,
+          0,
+          lastLocal
+        );
+        const endLocal = clamp(
           endGlobal - visibleWindow.startIndex,
-          visibleWindow.bars - 1
+          0,
+          lastLocal
         );
 
-        const x0 = converters.indexToX(startLocal) - layout.candleWidth / 2;
-        const x1 = converters.indexToX(endLocal) + layout.candleWidth / 2;
+        const left = Math.min(startLocal, endLocal);
+        const right = Math.max(startLocal, endLocal);
+
+        const x0 = converters.indexToX(left) - layout.candleWidth / 2;
+        const x1 = converters.indexToX(right) + layout.candleWidth / 2;
 
         const box = {
           x0,
