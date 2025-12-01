@@ -40,10 +40,18 @@ function App() {
   // Показывать ли POC (линия + жирная ступенька)
   const [profileShowPoc, setProfileShowPoc] = useState(true);
 
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+  const api = axios.create({ baseURL: API_BASE_URL });
+
   // Range-профиль (по выделенному диапазону)
   const [rangeProfileEnabled, setRangeProfileEnabled] = useState(true);
   // Сигнал «закрепить текущий Range-профиль»
   const [rangePinRequestId, setRangePinRequestId] = useState(0);
+
+  // Авто-профили (день / неделя / сессия)
+  const [autoDayProfile, setAutoDayProfile] = useState(true);
+  const [autoWeekProfile, setAutoWeekProfile] = useState(false);
+  const [autoSessionProfile, setAutoSessionProfile] = useState(true);
 
   async function fetchCandles(sym, tf, { preserveOld = true } = {}) {
     try {
@@ -53,7 +61,7 @@ function App() {
         setCandlesInfo(null);
       }
 
-      const response = await axios.get('http://localhost:3000/api/candles', {
+      const response = await api.get('/api/candles', {
         params: {
           symbol: sym.trim(),
           tf
@@ -63,15 +71,16 @@ function App() {
       setCandlesInfo(response.data);
     } catch (err) {
       console.error(err);
-      setError(err?.response?.data?.message || err.message || 'Ошибка загрузки');
+      setError(
+        err?.response?.data?.details ||
+          err?.response?.data?.message ||
+          err.message ||
+          'Ошибка загрузки'
+      );
     } finally {
       setLoading(false);
     }
   }
-
-  useEffect(() => {
-    fetchCandles(symbol, timeframe, { preserveOld: false });
-  }, []); // один раз при старте
 
   // Если меняем инструмент/таймфрейм — перезапрашиваем данные
   useEffect(() => {
@@ -306,6 +315,45 @@ function App() {
           Закрепить
         </button>
 
+        {/* Авто-профили */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '4px 8px',
+            borderRadius: 6,
+            backgroundColor: '#0b1020',
+            border: '1px solid #111827'
+          }}
+        >
+          <span style={{ fontSize: 13, color: '#9ca3af' }}>Авто-профили:</span>
+          <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <input
+              type="checkbox"
+              checked={autoDayProfile}
+              onChange={(e) => setAutoDayProfile(e.target.checked)}
+            />
+            День
+          </label>
+          <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <input
+              type="checkbox"
+              checked={autoWeekProfile}
+              onChange={(e) => setAutoWeekProfile(e.target.checked)}
+            />
+            Неделя
+          </label>
+          <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
+            <input
+              type="checkbox"
+              checked={autoSessionProfile}
+              onChange={(e) => setAutoSessionProfile(e.target.checked)}
+            />
+            Сессия
+          </label>
+        </div>
+
         {/* Кнопка принудительного обновления */}
         <button
           onClick={() => fetchCandles(symbol, timeframe, { preserveOld: false })}
@@ -382,6 +430,9 @@ function App() {
                 profileShowPoc={profileShowPoc}
                 rangeProfileEnabled={rangeProfileEnabled}
                 rangePinRequestId={rangePinRequestId}
+                autoDayProfile={autoDayProfile}
+                autoWeekProfile={autoWeekProfile}
+                autoSessionProfile={autoSessionProfile}
               />
             ) : (
               <div
